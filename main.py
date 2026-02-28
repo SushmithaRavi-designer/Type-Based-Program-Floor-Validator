@@ -363,22 +363,22 @@ def automate_function(
 
     # ── 3. Parse threshold matrix from JSON input and apply threshold mode ────
     try:
-        thresholds: dict = json.loads(function_inputs.program_threshold_matrix)
+        thresholds: dict = json.loads(function.inputs.program_threshold_matrix)
     except json.JSONDecodeError:
         thresholds = {}
 
     # Apply threshold mode adjustments
-    if function_inputs.threshold_mode == ThresholdMode.STRICT:
+    if function.inputs.threshold_mode == ThresholdMode.STRICT:
         # Strict mode: reduce thresholds by 10%
         thresholds = {prog: max(10, thresh - 10) for prog, thresh in thresholds.items()}
-        default_threshold = max(10, function_inputs.default_threshold - 10)
-    elif function_inputs.threshold_mode == ThresholdMode.PERMISSIVE:
+        default_threshold = max(10, function.inputs.default_threshold - 10)
+    elif function.inputs.threshold_mode == ThresholdMode.PERMISSIVE:
         # Permissive mode: increase thresholds by 10%
         thresholds = {prog: min(95, thresh + 10) for prog, thresh in thresholds.items()}
-        default_threshold = min(95, function_inputs.default_threshold + 10)
+        default_threshold = min(95, function.inputs.default_threshold + 10)
     else:  # ThresholdMode.CUSTOM
         # Custom mode: use values as-is
-        default_threshold = function_inputs.default_threshold
+        default_threshold = function.inputs.default_threshold
 
     # ── 4. Extract program / zone / floor / area per element ──────────────────
     floor_data: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -388,7 +388,7 @@ def automate_function(
 
     for obj in generic_models:
         # Program/Zone/Floor extracted from Type Name (e.g., "MEDICAL_ZoneA_LEVEL10")
-        raw_type = get_param_value(obj, function_inputs.program_source_parameter) or ""
+        raw_type = get_param_value(obj, function.inputs.program_source_parameter) or ""
         
         # If still empty, try common alternative names
         if not raw_type:
@@ -415,15 +415,15 @@ def automate_function(
             zone = "Unknown"
 
         # Floor / Level: Use level parsed from Type Name, fallback to level extraction
-        level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, function_inputs.level_parameter_name)
+        level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, function.inputs.level_parameter_name)
         if not level:
             level = "Unknown"
 
         # Extract material color from Revit material object (if enabled)
         material_color = None
-        if function_inputs.color_extraction_mode == ColorExtractionMode.ENABLED:
+        if function.inputs.color_extraction_mode == ColorExtractionMode.ENABLED:
             # First try to get from actual Revit material object
-            material_color = get_material_color(obj, function_inputs.material_color_parameter_name)
+            material_color = get_material_color(obj, function.inputs.material_color_parameter_name)
         if not material_color:
             material_color = "Not Found"
 
@@ -517,23 +517,17 @@ def automate_function(
         total         = sum(prog_areas.values())
         diversity     = shannon_diversity(prog_areas)
         is_mono, dominant, dom_pct, allowed = mono_functional_check(
-            prog_areas, thresholds, function_inputs.default_threshold
+            prog_areas, thresholds, function.inputs.default_threshold
         )
 
         if is_mono:
-            status = f"⚠️ MONO-FUNCTIONAL ({dom_pct:.1f}% > {allowed}%)"
+            level_status = f"⚠️ MONO-FUNCTIONAL ({dom_pct:.1f}% > {allowed}%)"
             issues.append(
                 f"Level {level} exceeds mono-functional threshold "
                 f"({dominant} = {dom_pct:.1f}%, limit = {allowed}%)."
             )
-            # Collect objects on this level for Speckle error pins
-            mono_floor_objects += [
-                obj for obj in generic_models
-                if (get_level_info(obj, function_inputs.level_parameter_name) or 
-                    get_param_value(obj, function_inputs.level_parameter_name) or "") == level
-            ]
         else:
-            status = "✅ OK"
+            level_status = "✅ OK"
 
         for program, area in sorted(prog_areas.items()):
             
@@ -541,6 +535,7 @@ def automate_function(
                 "Level":    level,
                 "Program":  program,
                 "Area":     round(area, 2),
+                "Status":   level_status,
             })
 
     # ── 6. Zone compatibility check ───────────────────────────────────────────
@@ -557,17 +552,11 @@ def automate_function(
         }
         zone_issue_objects += [
             obj for obj in generic_models
-            if (get_param_value(obj, function_inputs.zone_parameter_name) or "") in flagged_zones
+            if (get_param_value(obj, function.inputs.zone_parameter_name) or "") in flagged_zones
         ]
 
     # ── 7. Attach error pins to objects in Speckle viewer ────────────────────
-    if mono_floor_objects:
-        automate_context.attach_error_to_objects(
-            category="Mono-Functional Floor",
-            affected_objects=mono_floor_objects,
-            message="This floor exceeds the mono-functional program threshold.",
-        )
-
+    # Removed mono-functional floor error pins as requested
     if zone_issue_objects:
         automate_context.attach_error_to_objects(
             category="Zone Program Mismatch",
@@ -599,7 +588,7 @@ def automate_function(
     summary_lines.append("")
 
     # Include issues if any
-    if material_colors and function_inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
+    if material_colors and function.inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
         summary_lines.append("── Material Colors by Program ──")
         for prog in sorted(material_colors.keys()):
             color = material_colors[prog]
@@ -614,7 +603,7 @@ def automate_function(
         summary_lines.append("✅ All levels pass program allocation thresholds.")
 
     # Include level/zone summary based on report level (detailed and verbose)
-    if function_inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
+    if function.inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
         summary_lines += ["", "── Level Summary ──"]
         for level, prog_areas in sorted(floor_data.items()):
             total    = sum(prog_areas.values())
@@ -630,13 +619,13 @@ def automate_function(
             summary_lines.append(f"  {zone}: [{programs}]")
 
     # Include verbose metadata if verbose mode
-    if function_inputs.report_level == ReportLevel.VERBOSE:
+    if function.inputs.report_level == ReportLevel.VERBOSE:
         summary_lines += ["", "── Configuration Used ──"]
         summary_lines += [
-            f"  Threshold Mode: {function_inputs.threshold_mode.value}",
-            f"  Color Extraction: {function_inputs.color_extraction_mode.value}",
-            f"  Default Threshold: {function_inputs.default_threshold}%",
-            f"  Report Level: {function_inputs.report_level.value}",
+            f"  Threshold Mode: {function.inputs.threshold_mode.value}",
+            f"  Color Extraction: {function.inputs.color_extraction_mode.value}",
+            f"  Default Threshold: {function.inputs.default_threshold}%",
+            f"  Report Level: {function.inputs.report_level.value}",
         ]
 
     # Validation report is exported as CSV file via store_file_result()
