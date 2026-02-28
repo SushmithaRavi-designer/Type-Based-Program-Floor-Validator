@@ -203,40 +203,46 @@ def automate_function(
     if generic_models:
         first_obj = generic_models[0]
         
-        # Get direct attributes
-        debug_info.append(f"First object type: {type(first_obj).__name__}")
-        debug_info.append(f"Object class: {first_obj.__class__.__module__}.{first_obj.__class__.__name__}")
+        # Get Type Name to show format
+        raw_type = get_param_value(first_obj, "Type Name") or ""
+        debug_info.append(f"Sample Type Name: '{raw_type}'")
         
-        # List all direct attributes (non-private)
-        direct_attrs = [attr for attr in dir(first_obj) if not attr.startswith("_")]
-        debug_info.append(f"Direct attributes: {', '.join(direct_attrs[:15])}")
+        # Get DIA-2 to show diameter value
+        dia2_val = get_param_value(first_obj, "DIA-2") or "NOT FOUND"
+        debug_info.append(f"DIA-2 value: {dia2_val}")
         
-        # Get parameters dict structure
-        params = getattr(first_obj, "parameters", None)
-        if params:
-            debug_info.append(f"Parameters object type: {type(params).__name__}")
-            if isinstance(params, dict):
-                param_keys = list(params.keys())
-                debug_info.append(f"Parameter keys: {param_keys[:10]}")
-                # Show structure of first param
-                if param_keys:
-                    first_key = param_keys[0]
-                    first_val = params[first_key]
-                    debug_info.append(f"Example param '{first_key}': {first_val}")
+        # Get Type/Family name for zone extraction
+        type_name = get_param_value(first_obj, "Type") or ""
+        family_name = get_param_value(first_obj, "Family") or ""
+        debug_info.append(f"Type name (for zone): '{type_name}'")
+        debug_info.append(f"Family name (for zone): '{family_name}'")
+        
+        # Get material to show if it exists
+        material_obj = getattr(first_obj, "material", None)
+        if material_obj:
+            debug_info.append(f"Material object found: {type(material_obj).__name__}")
+            # Try to get color from material
+            mat_color = getattr(material_obj, "color", None)
+            if mat_color:
+                debug_info.append(f"Material.color: {mat_color}")
             else:
-                # DynamicBase-style parameters
-                param_attrs = [k for k in dir(params) if not k.startswith("_")]
-                debug_info.append(f"Parameter attributes: {param_attrs[:10]}")
+                debug_info.append("Material.color property: NOT FOUND (will show as 'Not Found' in report)")
         else:
-            debug_info.append("No 'parameters' object found")
+            debug_info.append("Material object: NOT FOUND")
         
-        # Check for common properties
-        for prop_name in ["Type", "type", "name", "Type Name", "category", "speckle_type", "level", "levelName"]:
-            val = getattr(first_obj, prop_name, None)
-            if val:
-                debug_info.append(f"  - {prop_name}: {val}")
+        # Show parse result
+        program, zone_from_name, floor_from_name = parse_type_name(raw_type)
+        debug_info.append(f"Parsed from Type Name: program='{program}', zone='{zone_from_name}', floor='{floor_from_name}'")
         
-        # Store debug info for later output
+        # Show what zone will be used
+        if zone_from_name != "Unknown":
+            effective_zone = zone_from_name
+            zone_source = "Type Name"
+        else:
+            effective_zone = type_name or family_name or "Unknown"
+            zone_source = "Type/Family name"
+        debug_info.append(f"Zone will be: '{effective_zone}' (from {zone_source})")
+        
         debug_output = "\n".join(debug_info)
 
     # ── 3. Parse threshold matrix from JSON input and apply threshold mode ────
@@ -282,8 +288,13 @@ def automate_function(
         # Parse Type Name into Program, Zone, Level (e.g., "MEDICAL_ZoneA_LEVEL10" → MEDICAL, ZoneA, LEVEL10)
         program, zone_from_name, floor_from_name = parse_type_name(raw_type)
         
-        # Zone: Use zone parsed from Type Name (underscore-separated), fallback to explicit parameter
-        zone = zone_from_name if zone_from_name != "Unknown" else get_param_value(obj, function_inputs.zone_parameter_name)
+        # Zone: First try parsed zone from Type Name, otherwise use Type/Family name as zone (common name)
+        if zone_from_name != "Unknown":
+            zone = zone_from_name
+        else:
+            # Use Type or Family name as zone (e.g., "HOTELS", "blocks", "MEDICAL")
+            zone = get_param_value(obj, "Type") or get_param_value(obj, "Family") or get_param_value(obj, "Family Type") or "Unknown"
+        
         if not zone:
             zone = "Unknown"
 
