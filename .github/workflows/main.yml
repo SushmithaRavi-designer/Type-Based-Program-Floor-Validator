@@ -12,59 +12,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5.0.0
-        with:
-          path: .
-      - name: Check and fix directory structure
-        run: |
-          echo "Checking directory structure..."
-          pwd
-          ls -la
-          
-          # If main.py is in a subdirectory, move it to root
-          if [ ! -f "main.py" ] && [ -f "./Type-Based-Program-Floor-Validator/main.py" ]; then
-            echo "main.py found in Type-Based-Program-Floor-Validator subdirectory"
-            cd Type-Based-Program-Floor-Validator
-            ls -la
-            cp -v main.py ../
-            cd ..
-            echo "main.py moved to root"
-            rm -rf Type-Based-Program-Floor-Validator
-          fi
-          
-          echo "Verifying main.py at root:"
-          [ -f "main.py" ] && echo "✅ main.py exists" || { echo "❌ main.py NOT found"; ls -la; exit 1; }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Verify repository structure
-        run: |
-          echo "Current directory: $(pwd)"
-          echo "Files in current directory:"
-          ls -la
-          echo "Python version:"
-          python --version
       - name: Install dependencies
         run: |
           pip install .[dev]
       - name: Extract functionInputSchema
         id: extract_schema
         run: |
-          python3 -c "
-import sys
-import json
-sys.path.insert(0, '.')
-try:
-    from main import FunctionInputs
-    schema = FunctionInputs.model_json_schema()
-    with open('functionSchema.json', 'w') as f:
-        json.dump(schema, f, indent=2)
-    print('✅ Schema generated successfully')
-except Exception as e:
-    print(f'❌ Error generating schema: {e}')
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-"
+          python main.py generate_schema ${HOME}/${{ env.FUNCTION_SCHEMA_FILE_NAME }}
       - name: Speckle Automate Function - Build and Publish
         uses: specklesystems/speckle-automate-github-composite-action@0.8.1
         with:
