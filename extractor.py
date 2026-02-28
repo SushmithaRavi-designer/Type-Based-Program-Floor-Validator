@@ -97,6 +97,34 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
     return None
 
 
+def extract_numeric_value(param_str: str) -> Optional[float]:
+    """
+    Extract numeric value from parameter string that may include units.
+    Examples:
+      "60 Meters" → 60.0
+      "60" → 60.0
+      "60.5" → 60.5
+      "invalid" → None
+    """
+    if not param_str:
+        return None
+    
+    # Remove common unit suffixes and extra whitespace
+    cleaned = param_str.strip()
+    
+    # Try to extract the first numeric value (with optional decimal)
+    import re
+    match = re.match(r"(-?\d+\.?\d*)", cleaned)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    
+    return None
+
+
+
 def collect_objects(obj, results: list):
     """
     Recursively walk a Speckle object tree and accumulate every

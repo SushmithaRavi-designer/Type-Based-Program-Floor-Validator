@@ -26,7 +26,7 @@ from kpi import (
     vertical_stacking_continuity,
 )
 from csv_exporter import rows_to_csv
-from extractor import get_param_value, estimate_area_from_display, get_material_color, get_level_info
+from extractor import get_param_value, estimate_area_from_display, get_material_color, get_level_info, extract_numeric_value
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -207,44 +207,22 @@ def automate_function(
         raw_type = get_param_value(first_obj, "Type Name") or ""
         debug_info.append(f"Sample Type Name: '{raw_type}'")
         
-        # DEBUG: Get DIA-2 - try multiple ways
+        # DEBUG: Get DIA-2 and show extraction
         dia2_val = get_param_value(first_obj, "DIA-2")
-        debug_info.append(f"DIA-2 via get_param_value: {dia2_val}")
+        debug_info.append(f"DIA-2 raw value (with units): '{dia2_val}'")
         
-        # Try direct attribute
-        dia2_direct = getattr(first_obj, "DIA-2", None)
-        debug_info.append(f"DIA-2 direct attribute: {dia2_direct}")
-        
-        # Try parameters dict
-        params = getattr(first_obj, "parameters", None)
-        if isinstance(params, dict):
-            dia2_from_dict = params.get("DIA-2", "NOT IN DICT")
-            debug_info.append(f"DIA-2 from parameters dict: {dia2_from_dict}")
-            
-            # List ALL parameter keys (first 20)
-            all_param_keys = list(params.keys())[:20]
-            debug_info.append(f"All parameters ({len(params)} total): {', '.join(all_param_keys)}")
-            
-            # List all parameter keys that contain 'DIA' or 'DIAMETER' or 'diameter'
-            dia_keys = [k for k in params.keys() if 'dia' in k.lower() or 'diameter' in k.lower()]
-            if dia_keys:
-                debug_info.append(f"Parameters with 'dia/diameter': {dia_keys}")
-                for key in dia_keys:
-                    debug_info.append(f"  {key}: {params[key]}")
-        else:
-            debug_info.append(f"Parameters type: {type(params).__name__} (not a dict - cannot list keys)")
-        
-        # Show what will be calculated
         if dia2_val:
-            try:
-                diameter = float(dia2_val)
-                radius = diameter / 2
-                calc_area = round(pi * (radius ** 2), 2)
-                debug_info.append(f"AREA CALCULATION: diameter={diameter} → radius={radius} → area={calc_area} m²")
-            except (ValueError, TypeError) as e:
-                debug_info.append(f"AREA CALCULATION ERROR: cannot convert '{dia2_val}' to float - {e}")
+            diameter = extract_numeric_value(dia2_val)
+            debug_info.append(f"DIA-2 extracted numeric: {diameter}")
+            if diameter:
+                try:
+                    radius = diameter / 2
+                    calc_area = round(pi * (radius ** 2), 2)
+                    debug_info.append(f"AREA CALCULATION: DIA-2={diameter} → radius={radius} → area={calc_area} m²")
+                except (ValueError, TypeError) as e:
+                    debug_info.append(f"AREA CALCULATION ERROR: {e}")
         else:
-            debug_info.append("AREA CALCULATION: DIA-2 not found, will be 0")
+            debug_info.append("DIA-2 not found")
         
         debug_output = "\n".join(debug_info)
 
@@ -316,37 +294,32 @@ def automate_function(
 
         # Area: Try DIA-2 first (diameter of floor plate), then configured parameter, then geometry
         area = 0.0
-        dia_2_raw = get_param_value(obj, "DIA-2")  # Get diameter value
-        
-        # DEBUG: Log all available parameters for first few elements
-        debug_element_params = {}
-        if len(all_elements_debug := []) < 3:  # First 3 elements only
-            params = getattr(obj, "parameters", {})
-            if isinstance(params, dict):
-                debug_element_params = {k: str(v)[:50] if v else "None" for k, v in params.items()}
+        dia_2_raw = get_param_value(obj, "DIA-2")  # Get diameter value (may include units like "60 Meters")
         
         if dia_2_raw:
-            try:
-                diameter = float(dia_2_raw)
-                # Calculate circular area: A = π × (d/2)²
-                radius = diameter / 2
-                area = round(pi * (radius ** 2), 2)
-            except (ValueError, TypeError):
-                area = 0.0
+            # Extract numeric value from string that may include units
+            diameter = extract_numeric_value(dia_2_raw)
+            if diameter:
+                try:
+                    # Calculate circular area: A = π × (d/2)²
+                    radius = diameter / 2
+                    area = round(pi * (radius ** 2), 2)
+                except (ValueError, TypeError):
+                    area = 0.0
         
-        # Try alternative parameter names if DIA-2 not found
+        # Try alternative parameter names if DIA-2 not found or extraction failed
         if area == 0.0:
             for alt_name in ["DIA_2", "Diameter", "diameter", "DIA", "Floor Diameter"]:
                 dia_2_alt = get_param_value(obj, alt_name)
                 if dia_2_alt:
-                    try:
-                        diameter = float(dia_2_alt)
-                        radius = diameter / 2
-                        area = round(pi * (radius ** 2), 2)
-                        dia_2_raw = f"{dia_2_alt} (from {alt_name})"
-                        break
-                    except (ValueError, TypeError):
-                        pass
+                    diameter = extract_numeric_value(dia_2_alt)
+                    if diameter:
+                        try:
+                            radius = diameter / 2
+                            area = round(pi * (radius ** 2), 2)
+                            break
+                        except (ValueError, TypeError):
+                            pass
         
         # If no diameter value, try configured area parameter
         if area == 0.0:
