@@ -17,9 +17,10 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
       1. Direct attribute on obj (exact and case-insensitive)
       2. obj.parameters as a plain dict  {key: value}
       3. obj.parameters as a nested dict {key: {"name": ..., "value": ...}}
-      4. obj.parameters as a Speckle DynamicBase whose child attributes
+      4. Parameter wrapped with units: {"value": 60, "unit": "Meters"}
+      5. obj.parameters as a Speckle DynamicBase whose child attributes
          are objects with .name / .value properties
-      5. Common alternative parameter names
+      6. Alternative parameter names (replace hyphen with underscore, etc.)
     """
     if obj is None:
         return None
@@ -45,7 +46,12 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
         # Exact match first
         if param_name in params:
             entry = params[param_name]
+            # Handle wrapped value with unit: {"value": 60, "unit": "Meters"}
             if isinstance(entry, dict):
+                val = entry.get("value")
+                if val is not None:
+                    return str(val)
+                # Also try nested name/value structure
                 return str(entry.get("value", "")) or None
             return str(entry) if entry is not None else None
         
@@ -53,14 +59,29 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
         for key, entry in params.items():
             if isinstance(key, str) and key.lower() == param_name.lower():
                 if isinstance(entry, dict):
+                    val = entry.get("value")
+                    if val is not None:
+                        return str(val)
                     return str(entry.get("value", "")) or None
                 return str(entry) if entry is not None else None
+        
+        # Try alternative naming (replace hyphen with underscore)
+        alt_param_name = param_name.replace("-", "_")
+        if alt_param_name != param_name and alt_param_name in params:
+            entry = params[alt_param_name]
+            if isinstance(entry, dict):
+                val = entry.get("value")
+                if val is not None:
+                    return str(val)
+            return str(entry) if entry is not None else None
         
         # Search by nested name key (original behavior)
         for entry in params.values():
             if isinstance(entry, dict):
                 if entry.get("name", "").lower() == param_name.lower():
-                    return str(entry["value"]) if entry.get("value") is not None else None
+                    val = entry.get("value")
+                    if val is not None:
+                        return str(val)
 
     # 4. DynamicBase-style parameters object
     else:

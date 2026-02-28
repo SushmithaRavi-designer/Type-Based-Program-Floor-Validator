@@ -207,41 +207,44 @@ def automate_function(
         raw_type = get_param_value(first_obj, "Type Name") or ""
         debug_info.append(f"Sample Type Name: '{raw_type}'")
         
-        # Get DIA-2 to show diameter value
-        dia2_val = get_param_value(first_obj, "DIA-2") or "NOT FOUND"
-        debug_info.append(f"DIA-2 value: {dia2_val}")
+        # DEBUG: Get DIA-2 - try multiple ways
+        dia2_val = get_param_value(first_obj, "DIA-2")
+        debug_info.append(f"DIA-2 via get_param_value: {dia2_val}")
         
-        # Get Type/Family name for zone extraction
-        type_name = get_param_value(first_obj, "Type") or ""
-        family_name = get_param_value(first_obj, "Family") or ""
-        debug_info.append(f"Type name (for zone): '{type_name}'")
-        debug_info.append(f"Family name (for zone): '{family_name}'")
+        # Try direct attribute
+        dia2_direct = getattr(first_obj, "DIA-2", None)
+        debug_info.append(f"DIA-2 direct attribute: {dia2_direct}")
         
-        # Get material to show if it exists
-        material_obj = getattr(first_obj, "material", None)
-        if material_obj:
-            debug_info.append(f"Material object found: {type(material_obj).__name__}")
-            # Try to get color from material
-            mat_color = getattr(material_obj, "color", None)
-            if mat_color:
-                debug_info.append(f"Material.color: {mat_color}")
-            else:
-                debug_info.append("Material.color property: NOT FOUND (will show as 'Not Found' in report)")
+        # Try parameters dict
+        params = getattr(first_obj, "parameters", None)
+        if isinstance(params, dict):
+            dia2_from_dict = params.get("DIA-2", "NOT IN DICT")
+            debug_info.append(f"DIA-2 from parameters dict: {dia2_from_dict}")
+            
+            # List ALL parameter keys (first 20)
+            all_param_keys = list(params.keys())[:20]
+            debug_info.append(f"All parameters ({len(params)} total): {', '.join(all_param_keys)}")
+            
+            # List all parameter keys that contain 'DIA' or 'DIAMETER' or 'diameter'
+            dia_keys = [k for k in params.keys() if 'dia' in k.lower() or 'diameter' in k.lower()]
+            if dia_keys:
+                debug_info.append(f"Parameters with 'dia/diameter': {dia_keys}")
+                for key in dia_keys:
+                    debug_info.append(f"  {key}: {params[key]}")
         else:
-            debug_info.append("Material object: NOT FOUND")
+            debug_info.append(f"Parameters type: {type(params).__name__} (not a dict - cannot list keys)")
         
-        # Show parse result
-        program, zone_from_name, floor_from_name = parse_type_name(raw_type)
-        debug_info.append(f"Parsed from Type Name: program='{program}', zone='{zone_from_name}', floor='{floor_from_name}'")
-        
-        # Show what zone will be used
-        if zone_from_name != "Unknown":
-            effective_zone = zone_from_name
-            zone_source = "Type Name"
+        # Show what will be calculated
+        if dia2_val:
+            try:
+                diameter = float(dia2_val)
+                radius = diameter / 2
+                calc_area = round(pi * (radius ** 2), 2)
+                debug_info.append(f"AREA CALCULATION: diameter={diameter} → radius={radius} → area={calc_area} m²")
+            except (ValueError, TypeError) as e:
+                debug_info.append(f"AREA CALCULATION ERROR: cannot convert '{dia2_val}' to float - {e}")
         else:
-            effective_zone = type_name or family_name or "Unknown"
-            zone_source = "Type/Family name"
-        debug_info.append(f"Zone will be: '{effective_zone}' (from {zone_source})")
+            debug_info.append("AREA CALCULATION: DIA-2 not found, will be 0")
         
         debug_output = "\n".join(debug_info)
 
@@ -314,6 +317,14 @@ def automate_function(
         # Area: Try DIA-2 first (diameter of floor plate), then configured parameter, then geometry
         area = 0.0
         dia_2_raw = get_param_value(obj, "DIA-2")  # Get diameter value
+        
+        # DEBUG: Log all available parameters for first few elements
+        debug_element_params = {}
+        if len(all_elements_debug := []) < 3:  # First 3 elements only
+            params = getattr(obj, "parameters", {})
+            if isinstance(params, dict):
+                debug_element_params = {k: str(v)[:50] if v else "None" for k, v in params.items()}
+        
         if dia_2_raw:
             try:
                 diameter = float(dia_2_raw)
@@ -322,6 +333,20 @@ def automate_function(
                 area = round(pi * (radius ** 2), 2)
             except (ValueError, TypeError):
                 area = 0.0
+        
+        # Try alternative parameter names if DIA-2 not found
+        if area == 0.0:
+            for alt_name in ["DIA_2", "Diameter", "diameter", "DIA", "Floor Diameter"]:
+                dia_2_alt = get_param_value(obj, alt_name)
+                if dia_2_alt:
+                    try:
+                        diameter = float(dia_2_alt)
+                        radius = diameter / 2
+                        area = round(pi * (radius ** 2), 2)
+                        dia_2_raw = f"{dia_2_alt} (from {alt_name})"
+                        break
+                    except (ValueError, TypeError):
+                        pass
         
         # If no diameter value, try configured area parameter
         if area == 0.0:
@@ -344,6 +369,7 @@ def automate_function(
             "material_color": material_color,
             "area": area,
             "speckle_type": getattr(obj, "speckle_type", "Unknown"),
+            "dia_2_raw": dia_2_raw,  # DEBUG: track what DIA-2 was extracted
         }
 
         # Track colors by program for reporting
@@ -385,20 +411,11 @@ def automate_function(
             status = "✅ OK"
 
         for program, area in sorted(prog_areas.items()):
-            pct = (area / total * 100) if total else 0
-            program_color = material_colors.get(program, "Not Found")
             
             csv_rows.append({
-                "Level":               level,
-                "Zone":                _zones_for_program(zone_data, program),
-                "Program":             program,
-                "Material Color":      program_color,
-                "Area":                round(area, 2),
-                "%":                   round(pct, 2),
-                "Dominant":            dominant,
-                "Diversity Index (H)": diversity,
-                "Vertical Continuity": stacking.get(program, 0.0),
-                "Status":              status,
+                "Level":    level,
+                "Program":  program,
+                "Area":     round(area, 2),
             })
 
     # ── 6. Zone compatibility check ───────────────────────────────────────────
@@ -435,17 +452,29 @@ def automate_function(
 
     # ── 8. Write version comment (with report_level control) ──────────────────
     summary_lines = [
-        f"✅ Analysed {len(generic_models)} Generic Model elements "
-        f"across {len(floor_data)} levels and {len(zone_data)} zones.",
+        f"✅ Analysed {len(generic_models)} elements across {len(floor_data)} levels and {len(zone_data)} zones.",
         "",
     ]
 
     # ALWAYS include debug info in summary for troubleshooting
-    summary_lines.append("── DEBUG: Element Structure ──")
+    summary_lines.append("── DEBUG: Extraction Details ──")
     summary_lines.extend(debug_info)
+    
+    # Show sample area values
+    sample_areas = []
+    for i, (obj_id, meta) in enumerate(list(element_metadata.items())[:5]):
+        dia_val = meta.get("dia_2_raw", "?")
+        area_val = meta.get("area", 0)
+        sample_areas.append(f"  Element {i+1}: DIA-2='{dia_val}' → Area={area_val} m²")
+    
+    if sample_areas:
+        summary_lines.append("")
+        summary_lines.append("Sample area calculations (first 5 elements):")
+        summary_lines.extend(sample_areas)
+    
     summary_lines.append("")
 
-    # Include material colors based on report level (detailed or verbose only)
+    # Include issues if any
     if material_colors and function_inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
         summary_lines.append("── Material Colors by Program ──")
         for prog in sorted(material_colors.keys()):

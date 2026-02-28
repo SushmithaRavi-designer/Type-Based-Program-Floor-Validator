@@ -11,15 +11,8 @@ from typing import List, Dict
 
 COLUMNS = [
     "Level",
-    "Zone",
     "Program",
-    "Material Color",
     "Area",
-    "%",
-    "Dominant",
-    "Diversity Index (H)",
-    "Vertical Continuity",
-    "Status",
 ]
 
 
