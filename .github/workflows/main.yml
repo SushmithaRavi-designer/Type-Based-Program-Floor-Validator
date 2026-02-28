@@ -14,10 +14,22 @@ jobs:
       - uses: actions/checkout@v5.0.0
       - name: Fix checkout path
         run: |
+          echo "Initial directory structure:"
+          pwd
+          ls -la
+          echo "---"
+          
+          # Handle nested Type-Based-Program-Floor-Validator directory
           if [ -d "./Type-Based-Program-Floor-Validator" ]; then
+            echo "Found Type-Based-Program-Floor-Validator subdirectory, moving files..."
             mv ./Type-Based-Program-Floor-Validator/* ./
-            rmdir ./Type-Based-Program-Floor-Validator
+            rm -rf ./Type-Based-Program-Floor-Validator
+            echo "Files moved to repository root"
           fi
+          
+          echo "Final directory structure:"
+          ls -la
+          [ -f "main.py" ] && echo "✅ main.py found at $(pwd)/main.py" || echo "❌ main.py NOT found"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
