@@ -26,6 +26,7 @@ COLUMNS = [
 def rows_to_csv(rows: List[Dict]) -> str:
     """
     Convert a list of row dicts to a UTF-8 CSV string.
+    Uses QUOTE_MINIMAL to ensure proper escaping and Excel compatibility.
 
     Parameters
     ----------
@@ -36,7 +37,15 @@ def rows_to_csv(rows: List[Dict]) -> str:
     str  Complete CSV text (header + data rows).
     """
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=COLUMNS, extrasaction="ignore")
+    # QUOTE_MINIMAL: quotes only when needed for special characters
+    # dialect='excel': standard Windows/Mac/Linux Excel format
+    writer = csv.DictWriter(
+        buf, 
+        fieldnames=COLUMNS, 
+        extrasaction="ignore",
+        quoting=csv.QUOTE_MINIMAL,
+        lineterminator='\r\n'  # Windows-style line endings for Excel
+    )
     writer.writeheader()
     writer.writerows(rows)
     return buf.getvalue()

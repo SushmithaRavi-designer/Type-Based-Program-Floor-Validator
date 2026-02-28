@@ -178,6 +178,29 @@ def automate_function(
         )
         return
 
+    # ── 2.5. Debug: Inspect available parameters in first element ──────────────
+    # This helps identify what parameters are actually available in the model
+    if generic_models:
+        first_obj = generic_models[0]
+        available_params = set()
+        
+        # Get direct attributes
+        for attr in dir(first_obj):
+            if not attr.startswith("_"):
+                available_params.add(attr)
+        
+        # Get parameters dict keys
+        params = getattr(first_obj, "parameters", None)
+        if isinstance(params, dict):
+            available_params.update(params.keys())
+        
+        # Log diagnostic info (visible in automation context)
+        debug_msg = (
+            f"Available element attributes (first object sample): "
+            f"{', '.join(sorted(list(available_params)[:20]))} ... "
+            f"(showing first 20 of {len(available_params)})"
+        )
+
     # ── 3. Parse threshold matrix from JSON input and apply threshold mode ────
     try:
         thresholds: dict = json.loads(function_inputs.program_threshold_matrix)
@@ -240,7 +263,7 @@ def automate_function(
         }
 
         # Track colors by program for reporting
-        if material_color:
+        if material_color and material_color != "Not Found":
             if program not in material_colors:
                 material_colors[program] = material_color
 
@@ -279,7 +302,7 @@ def automate_function(
 
         for program, area in sorted(prog_areas.items()):
             pct = (area / total * 100) if total else 0
-            program_color = material_colors.get(program, "—")
+            program_color = material_colors.get(program, "Not Found")
             
             csv_rows.append({
                 "Level":               level,
@@ -420,7 +443,7 @@ def automate_function(
 
 def _zones_for_program(zone_data: dict, program: str) -> str:
     matched = sorted(z for z, progs in zone_data.items() if program in progs)
-    return ", ".join(matched) if matched else "—"
+    return ", ".join(matched) if matched else "N/A"
 
 
 def automate_function_without_inputs(automate_context: AutomationContext) -> None:

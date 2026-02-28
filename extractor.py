@@ -14,32 +14,49 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
     Speckle object and return it as a string (or None if not found).
 
     Checks (in order):
-      1. Direct attribute on obj
+      1. Direct attribute on obj (exact and case-insensitive)
       2. obj.parameters as a plain dict  {key: value}
       3. obj.parameters as a nested dict {key: {"name": ..., "value": ...}}
       4. obj.parameters as a Speckle DynamicBase whose child attributes
          are objects with .name / .value properties
+      5. Common alternative parameter names
     """
     if obj is None:
         return None
 
-    # 1. Direct attribute
+    # 1. Direct attribute (exact match first, then case-insensitive)
     val = getattr(obj, param_name, None)
     if val is not None and not _is_base_like(val):
         return str(val)
+    
+    # Try case-insensitive attribute matching
+    for attr in _safe_dir(obj):
+        if attr.lower() == param_name.lower() and not attr.startswith("_"):
+            val = getattr(obj, attr, None)
+            if val is not None and not _is_base_like(val):
+                return str(val)
 
     params = getattr(obj, "parameters", None)
     if params is None:
         return None
 
-    # 2/3. Plain dict
+    # 2/3. Plain dict (exact and case-insensitive)
     if isinstance(params, dict):
+        # Exact match first
         if param_name in params:
             entry = params[param_name]
             if isinstance(entry, dict):
                 return str(entry.get("value", "")) or None
             return str(entry) if entry is not None else None
-        # Search by nested name key
+        
+        # Case-insensitive match
+        for key, entry in params.items():
+            if isinstance(key, str) and key.lower() == param_name.lower():
+                if isinstance(entry, dict):
+                    return str(entry.get("value", "")) or None
+                return str(entry) if entry is not None else None
+        
+        # Search by nested name key (original behavior)
         for entry in params.values():
             if isinstance(entry, dict):
                 if entry.get("name", "").lower() == param_name.lower():
@@ -80,20 +97,28 @@ def get_material_color(obj, color_param_name: str = "Material") -> Optional[str]
     Extract material color information from a Speckle object.
 
     Attempts to find color from:
-      1. Direct color parameter or property
+      1. Direct color parameter or property (Color, colour, Colour)
       2. Material-related properties
       3. Render material properties
       4. Display color attributes
+      5. Parameter with alternative names (Colour, Material Color, etc.)
 
     Returns color as hex string (e.g., "FF0000") or None if not found.
     """
     if obj is None:
         return None
 
-    # Try color parameter directly
-    color_val = get_param_value(obj, "Color")
-    if color_val:
-        return _normalize_hex_color(color_val)
+    # Try color parameter directly (exact and case-insensitive)
+    for color_name in ["Color", "colour", "Colour", "COLOUR"]:
+        color_val = get_param_value(obj, color_name)
+        if color_val:
+            return _normalize_hex_color(color_val)
+
+    # Try direct color attributes
+    for color_attr in ["color", "colour", "Color", "displayColor", "materialColor", "fillColor"]:
+        color_val = getattr(obj, color_attr, None)
+        if color_val:
+            return _normalize_hex_color(color_val)
 
     # Try material.color or render material properties
     material = getattr(obj, "material", None)
@@ -116,10 +141,11 @@ def get_material_color(obj, color_param_name: str = "Material") -> Optional[str]
     if display_color:
         return _normalize_hex_color(display_color)
 
-    # Try material parameter directly
-    material_str = get_param_value(obj, color_param_name)
-    if material_str:
-        return _normalize_hex_color(material_str)
+    # Try material parameter directly with various names
+    for material_name in [color_param_name, "Material", "Material Color", "MaterialColor", "Finish", "Surface"]:
+        material_str = get_param_value(obj, material_name)
+        if material_str:
+            return _normalize_hex_color(material_str)
 
     return None
 
@@ -130,16 +156,26 @@ def get_level_info(obj, level_param_name: str = "Level") -> Optional[str]:
 
     Checks (in order):
       1. Explicit level parameter (e.g., "Level", "Floor")
-      2. level.name attribute (Revit Level reference)
-      3. levelName attribute
+      2. Alternative names ("Floor", "Story", "Height", "Elevation")
+      3. level.name attribute (Revit Level reference)
+      4. levelName attribute
+      5. Direct Level property
     """
     if obj is None:
         return None
 
-    # Try explicit level parameter
+    # Try explicit level parameter (exact and case-insensitive)
     level_val = get_param_value(obj, level_param_name)
     if level_val:
         return level_val.strip()
+
+    # Try alternative level/floor parameter names
+    alternative_names = ["Floor", "Story", "Storey", "Height", "Elevation", "Level Name", "LevelName"]
+    for alt_name in alternative_names:
+        if alt_name.lower() != level_param_name.lower():
+            level_val = get_param_value(obj, alt_name)
+            if level_val:
+                return level_val.strip()
 
     # Try level object reference
     level = getattr(obj, "level", None)
@@ -152,6 +188,11 @@ def get_level_info(obj, level_param_name: str = "Level") -> Optional[str]:
     level_name = getattr(obj, "levelName", None)
     if level_name:
         return level_name.strip()
+    
+    # Try direct Level property (sometimes Revit stores as numeric/string)
+    direct_level = getattr(obj, "Level", None)
+    if direct_level:
+        return str(direct_level).strip()
 
     return None
 
