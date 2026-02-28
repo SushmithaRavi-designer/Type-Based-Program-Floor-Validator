@@ -29,6 +29,24 @@ from csv_exporter import rows_to_csv
 from extractor import get_param_value, estimate_area_from_display, get_material_color, get_level_info, extract_numeric_value
 
 
+def _has_parameter_data_in_properties(obj) -> bool:
+    """Check if object has parameter data nested under properties"""
+    properties = getattr(obj, "properties", None)
+    if not isinstance(properties, dict):
+        return False
+    
+    # Check for parameters or type_parameters in properties
+    if properties.get("parameters") is not None or properties.get("type_parameters") is not None:
+        return True
+    
+    # Check for Type Parameters section
+    params = properties.get("parameters", {})
+    if isinstance(params, dict) and "Type Parameters" in params:
+        return True
+    
+    return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Enums for Fixed Options (Recommended Approach)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,50 +185,47 @@ def automate_function(
     # ── 2. Flatten all objects and filter Generic Models ──────────────────────
     all_objects = list(flatten_base(version_root_object))
     
-    # Try filtering for Generic Models first - look for actual Revit objects with parameters
+    # Try filtering for Generic Models first - must have parameters data somewhere
     generic_models = [
         obj for obj in all_objects
         if "Generic Model" in str(getattr(obj, "category", ""))
-        and (hasattr(obj, "parameters") and getattr(obj, "parameters") is not None
-             or hasattr(obj, "type_parameters") and getattr(obj, "type_parameters") is not None)
+        and (
+            # Has parameters or type_parameters directly
+            (hasattr(obj, "parameters") and getattr(obj, "parameters") is not None)
+            or (hasattr(obj, "type_parameters") and getattr(obj, "type_parameters") is not None)
+            # OR has properties with parameter data
+            or _has_parameter_data_in_properties(obj)
+        )
     ]
     
-    # If no Generic Models found, try other common categories
-    if not generic_models:
-        generic_models = [
-            obj for obj in all_objects
-            if getattr(obj, "speckle_type", "").lower() in ["revitgenericmodel", "revitfamilyinstance"]
-            and (hasattr(obj, "parameters") or hasattr(obj, "type_parameters"))
-        ]
-    
-    # If still no results, try objects with actual Revit properties (type, family, etc)
+    # If no Generic Models found, try any object with type/family + parameter data
     if not generic_models:
         generic_models = [
             obj for obj in all_objects
             if (getattr(obj, "type", None) or getattr(obj, "family", None))
-            and (hasattr(obj, "parameters") or hasattr(obj, "type_parameters"))
+            and _has_parameter_data_in_properties(obj)
             and "System" not in str(getattr(obj, "category", ""))
         ]
-
-    # Last resort: any object with type_parameters (these have the DIA-2)
+    
+    # Last resort: any object with properties containing parameters
     if not generic_models:
         generic_models = [
             obj for obj in all_objects
-            if getattr(obj, "type_parameters", None) is not None
+            if _has_parameter_data_in_properties(obj)
         ]
 
     if not generic_models:
         automate_context.mark_run_failed(
             f"No processable elements found. Total objects: {len(all_objects)}. "
-            "Checked for Generic Models with parameters/type_parameters, Revit objects, and objects with type/family. "
-            "Ensure your model contains Revit elements with Type Parameters dimension data."
+            "Checked for objects with parameters (including nested in properties.parameters). "
+            "Ensure your model contains Revit elements exported with Type Parameters dimension data."
         )
         return
 
     # ── 2.5. Debug: Inspect available parameters in first element ──────────────
     # This helps identify what parameters are actually available in the model
     debug_info = []
-    debug_info.append(f"Total objects: {len(all_objects)}, Processing: {len(generic_models)}")
+    debug_info.append(f"Total objects: {len(all_objects)}, Processing: {len(generic_models)} Generic Models")
     
     if generic_models:
         first_obj = generic_models[0]
@@ -221,34 +236,31 @@ def automate_function(
         debug_info.append(f"type: {getattr(first_obj, 'type', 'NOT FOUND')}")
         debug_info.append(f"family: {getattr(first_obj, 'family', 'NOT FOUND')}")
         
-        # Show if parameters/type_parameters exist
+        # Show if parameters/type_parameters exist at object level
         params = getattr(first_obj, "parameters", None)
         type_params = getattr(first_obj, "type_parameters", None)
-        debug_info.append(f"has parameters: {params is not None} (type: {type(params).__name__})")
-        debug_info.append(f"has type_parameters: {type_params is not None} (type: {type(type_params).__name__})")
+        debug_info.append(f"obj.parameters: {params is not None}")
+        debug_info.append(f"obj.type_parameters: {type_params is not None}")
         
-        # Show parameter structure
-        if isinstance(params, dict):
-            debug_info.append(f"parameters keys: {list(params.keys())[:5]}")
-            if "Type Parameters" in params:
-                tp = params.get("Type Parameters", {})
-                if isinstance(tp, dict):
-                    debug_info.append(f"Type Parameters keys: {list(tp.keys())}")
-                    if "Dimensions" in tp:
-                        dims = tp.get("Dimensions", {})
-                        if isinstance(dims, dict):
-                            debug_info.append(f"Dimensions keys: {list(dims.keys())}")
-                            dia_val = dims.get("DIA-2")
-                            debug_info.append(f"DIA-2 value: {dia_val}")
-        
-        if isinstance(type_params, dict):
-            debug_info.append(f"type_parameters keys: {list(type_params.keys())[:10]}")
-            if "Dimensions" in type_params:
-                dims = type_params.get("Dimensions", {})
-                if isinstance(dims, dict):
-                    debug_info.append(f"Dimensions in type_parameters: {list(dims.keys())}")
-                    dia_val = dims.get("DIA-2")
-                    debug_info.append(f"DIA-2 from type_parameters: {dia_val}")
+        # Check properties
+        properties = getattr(first_obj, "properties", None)
+        if isinstance(properties, dict):
+            debug_info.append(f"properties exists: True")
+            props_params = properties.get("parameters")
+            props_type_params = properties.get("type_parameters")
+            debug_info.append(f"properties.parameters: {props_params is not None}")
+            debug_info.append(f"properties.type_parameters: {props_type_params is not None}")
+            
+            if isinstance(props_params, dict) and "Type Parameters" in props_params:
+                tp = props_params.get("Type Parameters", {})
+                if isinstance(tp, dict) and "Dimensions" in tp:
+                    dims = tp.get("Dimensions", {})
+                    if isinstance(dims, dict):
+                        debug_info.append(f"Dimensions keys: {list(dims.keys())}")
+                        dia_val = dims.get("DIA-2")
+                        debug_info.append(f"DIA-2 in dimensions: {dia_val}")
+        else:
+            debug_info.append(f"properties exists: False")
         
         # Try extraction
         dia2_val = get_param_value(first_obj, "DIA-2")
@@ -261,11 +273,11 @@ def automate_function(
                 try:
                     radius = diameter / 2
                     calc_area = round(pi * (radius ** 2), 2)
-                    debug_info.append(f"AREA CALCULATION SUCCESS: DIA-2={diameter} → area={calc_area} m²")
+                    debug_info.append(f"✓ AREA CALCULATION SUCCESS: DIA-2={diameter} → area={calc_area} m²")
                 except (ValueError, TypeError) as e:
                     debug_info.append(f"AREA CALCULATION ERROR: {e}")
         else:
-            debug_info.append("DIA-2 not found - Area will be 0")
+            debug_info.append("✗ DIA-2 not found - Area will be 0")
         
         debug_output = "\n".join(debug_info)
 
