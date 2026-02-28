@@ -12,24 +12,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5.0.0
-      - name: Fix checkout path
+      - name: Fix checkout path and flatten directory structure
         run: |
-          echo "Initial directory structure:"
-          pwd
+          echo "Current working directory: $(pwd)"
+          echo "Directory structure:"
           ls -la
-          echo "---"
           
-          # Handle nested Type-Based-Program-Floor-Validator directory
-          if [ -d "./Type-Based-Program-Floor-Validator" ]; then
-            echo "Found Type-Based-Program-Floor-Validator subdirectory, moving files..."
-            mv ./Type-Based-Program-Floor-Validator/* ./
-            rm -rf ./Type-Based-Program-Floor-Validator
-            echo "Files moved to repository root"
+          # GitHub Actions may create nested directories
+          # Find main.py and move everything to the root
+          if [ ! -f "main.py" ]; then
+            echo "main.py not found at root, searching for it..."
+            MAIN_DIR=$(find . -maxdepth 2 -name "main.py" -type f -exec dirname {} \;)
+            if [ -n "$MAIN_DIR" ]; then
+              echo "Found main.py in: $MAIN_DIR"
+              if [ "$MAIN_DIR" != "." ]; then
+                cd "$MAIN_DIR"
+                cp -r * ../
+                cd ..
+                rm -rf "$MAIN_DIR"
+              fi
+            fi
           fi
           
           echo "Final directory structure:"
           ls -la
-          [ -f "main.py" ] && echo "✅ main.py found at $(pwd)/main.py" || echo "❌ main.py NOT found"
+          [ -f "main.py" ] && echo "✅ main.py found at root" || { echo "❌ main.py NOT found"; exit 1; }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
