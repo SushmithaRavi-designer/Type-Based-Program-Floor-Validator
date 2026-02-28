@@ -427,46 +427,31 @@ def automate_function(
         if not material_color:
             material_color = "Not Found"
 
-        # Area: Try DIA-2 first (diameter of floor plate), then configured parameter, then geometry
+        # Area: Extract ONLY from DIA-2 in Revit's nested Type Parameters → Dimensions
+        # Path: obj.properties["Parameters"]["Type Parameters"]["Dimensions"]["DIA-2"]
         area = 0.0
-        dia_2_raw = get_param_value(obj, "DIA-2")  # Get diameter value (may include units like "60 Meters")
+        dia_2_raw = None
         
-        if dia_2_raw:
-            # Extract numeric value from string that may include units
-            diameter = extract_numeric_value(dia_2_raw)
-            if diameter:
-                try:
-                    # Calculate circular area: A = π × (d/2)²
-                    radius = diameter / 2
-                    area = round(pi * (radius ** 2), 2)
-                except (ValueError, TypeError):
-                    area = 0.0
-        
-        # Try alternative parameter names if DIA-2 not found or extraction failed
-        if area == 0.0:
-            for alt_name in ["DIA_2", "Diameter", "diameter", "DIA", "Floor Diameter"]:
-                dia_2_alt = get_param_value(obj, alt_name)
-                if dia_2_alt:
-                    diameter = extract_numeric_value(dia_2_alt)
-                    if diameter:
-                        try:
-                            radius = diameter / 2
-                            area = round(pi * (radius ** 2), 2)
-                            break
-                        except (ValueError, TypeError):
-                            pass
-        
-        # If no diameter value, try configured area parameter
-        if area == 0.0:
-            area_raw = get_param_value(obj, function_inputs.area_parameter_name)
-            try:
-                area = float(area_raw) if area_raw else 0.0
-            except (ValueError, TypeError):
-                area = 0.0
-        
-        # Fall back to geometry estimate if no parameter found
-        if area == 0.0:
-            area = estimate_area_from_display(obj)
+        properties = getattr(obj, "properties", None)
+        if isinstance(properties, dict):
+            params = properties.get("Parameters")  # Note: capital P
+            if isinstance(params, dict):
+                type_params = params.get("Type Parameters")
+                if isinstance(type_params, dict):
+                    dimensions = type_params.get("Dimensions")
+                    if isinstance(dimensions, dict):
+                        dia_2_raw = dimensions.get("DIA-2")
+                        
+                        if dia_2_raw is not None:
+                            # Extract numeric value
+                            diameter = extract_numeric_value(str(dia_2_raw))
+                            if diameter and diameter > 0:
+                                try:
+                                    # Calculate circular area: A = π × (d/2)²
+                                    radius = diameter / 2
+                                    area = round(pi * (radius ** 2), 2)
+                                except (ValueError, TypeError):
+                                    area = 0.0
 
         # Store metadata
         obj_id = getattr(obj, "id", None) or id(obj)
