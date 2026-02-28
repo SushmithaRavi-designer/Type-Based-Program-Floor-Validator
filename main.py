@@ -303,20 +303,36 @@ def automate_function(
         # Check properties
         properties = getattr(first_obj, "properties", None)
         if isinstance(properties, dict):
-            debug_info.append(f"properties exists: True")
+            debug_info.append(f"properties exists: True (dict)")
+            debug_info.append(f"properties keys: {list(properties.keys())[:20]}")  # Show first 20 keys
+            
             props_params = properties.get("parameters")
             props_type_params = properties.get("type_parameters")
-            debug_info.append(f"properties.parameters: {props_params is not None}")
-            debug_info.append(f"properties.type_parameters: {props_type_params is not None}")
+            debug_info.append(f"properties['parameters']: {props_params is not None}")
+            debug_info.append(f"properties['type_parameters']: {props_type_params is not None}")
             
-            if isinstance(props_params, dict) and "Type Parameters" in props_params:
-                tp = props_params.get("Type Parameters", {})
-                if isinstance(tp, dict) and "Dimensions" in tp:
-                    dims = tp.get("Dimensions", {})
-                    if isinstance(dims, dict):
-                        debug_info.append(f"Dimensions keys: {list(dims.keys())}")
-                        dia_val = dims.get("DIA-2")
-                        debug_info.append(f"DIA-2 in dimensions: {dia_val}")
+            # Try to find DIA-2 in any nested location
+            for key in properties.keys():
+                if "DIA" in key.upper() or "dimension" in key.lower():
+                    debug_info.append(f"  Found DIA-like key: '{key}' = {properties[key]}")
+            
+            if isinstance(props_params, dict):
+                debug_info.append(f"  parameters keys: {list(props_params.keys())}")
+                if "Type Parameters" in props_params:
+                    tp = props_params.get("Type Parameters", {})
+                    if isinstance(tp, dict) and "Dimensions" in tp:
+                        dims = tp.get("Dimensions", {})
+                        if isinstance(dims, dict):
+                            debug_info.append(f"  Dimensions keys: {list(dims.keys())}")
+                            dia_val = dims.get("DIA-2")
+                            debug_info.append(f"  DIA-2 in dimensions: {dia_val}")
+        elif properties is not None:
+            debug_info.append(f"properties exists: True (object, not dict)")
+            try:
+                props_attrs = [a for a in dir(properties) if not a.startswith('_')]
+                debug_info.append(f"  properties attributes (first 20): {props_attrs[:20]}")
+            except:
+                debug_info.append(f"  Could not enumerate properties attributes")
         else:
             debug_info.append(f"properties exists: False")
         
