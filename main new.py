@@ -5,6 +5,7 @@ Use the automation_context module to wrap your function in an Automate context h
 
 import json
 from collections import defaultdict
+from enum import Enum
 
 from pydantic import Field
 from speckle_automate import (
@@ -26,6 +27,30 @@ from utils.extractor import get_param_value, estimate_area_from_display, get_mat
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Enums for Fixed Options (Recommended Approach)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ColorExtractionMode(str, Enum):
+    """Material color extraction control."""
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+
+
+class ReportLevel(str, Enum):
+    """Reporting detail level."""
+    SUMMARY = "summary"
+    DETAILED = "detailed"
+    VERBOSE = "verbose"
+
+
+class ThresholdMode(str, Enum):
+    """Threshold validation mode."""
+    STRICT = "strict"
+    PERMISSIVE = "permissive"
+    CUSTOM = "custom"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Input Schema
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -37,48 +62,82 @@ class FunctionInputs(AutomateBase):
     https://docs.pydantic.dev/latest/usage/models/
     """
 
+    # ── Parameter Configuration ──
     program_source_parameter: str = Field(
         default="Type Name",
         title="Program Source Parameter",
-        description="Name of parameter containing program information (e.g. Type Name)",
+        description="Name of parameter containing program information (e.g., Type Name, Category)",
     )
+    
     zone_parameter_name: str = Field(
         default="Zone",
         title="Zone Parameter Name",
         description="Parameter storing zone information",
     )
+    
     level_parameter_name: str = Field(
         default="Level",
         title="Level Parameter Name",
         description="Parameter that defines building level",
     )
-    program_threshold_matrix: str = Field(
-        default='{"Retail": 60, "Office": 75, "Housing": 80, "Exhibition": 65}',
-        title="Program Threshold Matrix (JSON)",
-        description=(
-            "JSON dictionary mapping program type to its maximum allowed floor percentage. "
-            'Example: {"Retail": 60, "Office": 75, "Housing": 80}'
-        ),
-    )
-    default_threshold: float = Field(
-        default=70.0,
-        title="Default Threshold (%)",
-        description="Fallback threshold used if a program is not defined in the matrix.",
-    )
+    
     area_parameter_name: str = Field(
         default="Area",
         title="Area Parameter Name",
         description="Parameter containing element area",
     )
+    
     material_color_parameter_name: str = Field(
         default="Material",
         title="Material Color Parameter Name",
         description="Parameter containing material or color information",
     )
-    use_material_color: bool = Field(
-        default=True,
-        title="Use Material Color",
-        description="Whether to extract and consider material color information from elements",
+
+    # ── Color Extraction Control ──
+    color_extraction_mode: ColorExtractionMode = Field(
+        default=ColorExtractionMode.ENABLED,
+        title="Color Extraction Mode",
+        description="Enable or disable material color extraction from Speckle objects",
+    )
+
+    # ── Threshold Configuration ──
+    threshold_mode: ThresholdMode = Field(
+        default=ThresholdMode.CUSTOM,
+        title="Threshold Mode",
+        description=(
+            "STRICT: Apply thresholds strictly | "
+            "PERMISSIVE: Allow higher tolerance | "
+            "CUSTOM: Use defined threshold matrix"
+        ),
+    )
+    
+    program_threshold_matrix: str = Field(
+        default='{"Retail": 60, "Office": 75, "Housing": 80, "Exhibition": 65}',
+        title="Program Threshold Matrix (JSON)",
+        description=(
+            "JSON dictionary mapping program type to its maximum allowed percentage. "
+            'Example: {"Retail": 60, "Office": 75, "Housing": 80} | '
+            "Only used when threshold_mode is CUSTOM"
+        ),
+    )
+    
+    default_threshold: float = Field(
+        default=70.0,
+        title="Default Threshold (%)",
+        description="Fallback threshold used if a program is not defined in the matrix (0-100)",
+        ge=0.0,
+        le=100.0,
+    )
+
+    # ── Report Configuration ──
+    report_level: ReportLevel = Field(
+        default=ReportLevel.DETAILED,
+        title="Report Detail Level",
+        description=(
+            "SUMMARY: Basic statistics only | "
+            "DETAILED: Full analysis with colors and levels | "
+            "VERBOSE: Include all metadata and processing details"
+        ),
     )
 
 
@@ -117,11 +176,24 @@ def automate_function(
         )
         return
 
-    # ── 3. Parse threshold matrix from JSON input ─────────────────────────────
+    # ── 3. Parse threshold matrix from JSON input and apply threshold mode ────
     try:
         thresholds: dict = json.loads(function_inputs.program_threshold_matrix)
     except json.JSONDecodeError:
         thresholds = {}
+
+    # Apply threshold mode adjustments
+    if function_inputs.threshold_mode == ThresholdMode.STRICT:
+        # Strict mode: reduce thresholds by 10%
+        thresholds = {prog: max(10, thresh - 10) for prog, thresh in thresholds.items()}
+        default_threshold = max(10, function_inputs.default_threshold - 10)
+    elif function_inputs.threshold_mode == ThresholdMode.PERMISSIVE:
+        # Permissive mode: increase thresholds by 10%
+        thresholds = {prog: min(95, thresh + 10) for prog, thresh in thresholds.items()}
+        default_threshold = min(95, function_inputs.default_threshold + 10)
+    else:  # ThresholdMode.CUSTOM
+        # Custom mode: use values as-is
+        default_threshold = function_inputs.default_threshold
 
     # ── 4. Extract program / zone / floor / area per element ──────────────────
     floor_data: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -140,9 +212,9 @@ def automate_function(
         # Floor / Level: use dedicated level extraction function, fall back to parsed floor
         level = get_level_info(obj, function_inputs.level_parameter_name) or floor_from_name
 
-        # Extract material color if enabled
+        # Extract material color if enabled (check Enum mode)
         material_color = None
-        if function_inputs.use_material_color:
+        if function_inputs.color_extraction_mode == ColorExtractionMode.ENABLED:
             material_color = get_material_color(obj, function_inputs.material_color_parameter_name)
 
         # Area: prefer explicit parameter, fall back to geometry estimate
@@ -222,7 +294,7 @@ def automate_function(
 
     # ── 6. Zone compatibility check ───────────────────────────────────────────
     zone_issues = check_zone_compatibility(
-        dict(zone_data), thresholds, function_inputs.default_threshold
+        dict(zone_data), thresholds, default_threshold
     )
     if zone_issues:
         issues.extend(zone_issues)
@@ -259,39 +331,53 @@ def automate_function(
     if zone_issue_objects:
         automate_context.add_version_tag("zone-mismatch")
 
-    # ── 9. Write version comment ──────────────────────────────────────────────
+    # ── 9. Write version comment (with report_level control) ─────────────────
     summary_lines = [
         f"✅ Analysed {len(generic_models)} Generic Model elements "
         f"across {len(floor_data)} levels and {len(zone_data)} zones.",
         "",
     ]
 
-    if material_colors:
+    # Include material colors based on report level (detailed or verbose only)
+    if material_colors and function_inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
         summary_lines.append("── Material Colors by Program ──")
         for prog in sorted(material_colors.keys()):
             color = material_colors[prog]
             summary_lines.append(f"  {prog}: #{color}")
         summary_lines.append("")
 
+    # Always include issues
     if issues:
         summary_lines.append("⚠️  Issues detected:")
         summary_lines += [f"  • {i}" for i in issues]
     else:
         summary_lines.append("✅ All levels pass program allocation thresholds.")
 
-    summary_lines += ["", "── Level Summary ──"]
-    for level, prog_areas in sorted(floor_data.items()):
-        total    = sum(prog_areas.values())
-        dominant = max(prog_areas, key=prog_areas.get)
-        pct      = prog_areas[dominant] / total * 100 if total else 0
-        summary_lines.append(
-            f"  {level}: total={total:.1f} m²  |  dominant={dominant} ({pct:.1f}%)"
-        )
+    # Include level/zone summary based on report level (detailed and verbose)
+    if function_inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
+        summary_lines += ["", "── Level Summary ──"]
+        for level, prog_areas in sorted(floor_data.items()):
+            total    = sum(prog_areas.values())
+            dominant = max(prog_areas, key=prog_areas.get)
+            pct      = prog_areas[dominant] / total * 100 if total else 0
+            summary_lines.append(
+                f"  {level}: total={total:.1f} m²  |  dominant={dominant} ({pct:.1f}%)"
+            )
 
-    summary_lines += ["", "── Zone Summary ──"]
-    for zone, prog_areas in sorted(zone_data.items()):
-        programs = ", ".join(sorted(prog_areas.keys()))
-        summary_lines.append(f"  {zone}: [{programs}]")
+        summary_lines += ["", "── Zone Summary ──"]
+        for zone, prog_areas in sorted(zone_data.items()):
+            programs = ", ".join(sorted(prog_areas.keys()))
+            summary_lines.append(f"  {zone}: [{programs}]")
+
+    # Include verbose metadata if verbose mode
+    if function_inputs.report_level == ReportLevel.VERBOSE:
+        summary_lines += ["", "── Configuration Used ──"]
+        summary_lines += [
+            f"  Threshold Mode: {function_inputs.threshold_mode.value}",
+            f"  Color Extraction: {function_inputs.color_extraction_mode.value}",
+            f"  Default Threshold: {function_inputs.default_threshold}%",
+            f"  Report Level: {function_inputs.report_level.value}",
+        ]
 
     automate_context.add_version_comment("\n".join(summary_lines))
 
