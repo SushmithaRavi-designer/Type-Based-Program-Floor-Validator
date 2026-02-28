@@ -486,13 +486,32 @@ def automate_function(
 
     stacking = vertical_stacking_continuity(dict(floor_data))
     
-    # DEBUG: Count objects with actual DIA-2 values
+    # DEBUG: Count objects with actual DIA-2 values and show distribution
     objs_with_dia2 = sum(1 for meta in element_metadata.values() if meta.get("dia_2_raw") is not None)
     objs_with_area = sum(1 for meta in element_metadata.values() if meta.get("area", 0) > 0)
     total_area_sum = sum(meta.get("area", 0) for meta in element_metadata.values())
+    
+    # Count unique DIA-2 values
+    dia2_values = {}
+    for meta in element_metadata.values():
+        raw = meta.get("dia_2_raw")
+        if raw is not None:
+            # Extract numeric value from dict if needed
+            dia_num = raw.get("value") if isinstance(raw, dict) else raw
+            if dia_num not in dia2_values:
+                dia2_values[dia_num] = 0
+            dia2_values[dia_num] += 1
+    
     debug_info.append("")
     debug_info.append(f"AGGREGATION SUMMARY: {len(generic_models)} objects → {objs_with_dia2} with DIA-2 → {objs_with_area} with calculated area")
     debug_info.append(f"Total area across all objects: {total_area_sum:.2f} m²")
+    debug_info.append(f"Unique DIA-2 values found: {len(dia2_values)}")
+    for dia_val, count in sorted(dia2_values.items()):
+        try:
+            test_area = round(pi * ((float(dia_val) / 2) ** 2), 2)
+            debug_info.append(f"  DIA-2={dia_val}: {count} objects → area={test_area} m² each")
+        except:
+            debug_info.append(f"  DIA-2={dia_val}: {count} objects")
 
     for level, prog_areas in sorted(floor_data.items()):
         total         = sum(prog_areas.values())
@@ -567,13 +586,15 @@ def automate_function(
     summary_lines.extend(debug_info)
     
     # Show sample of per-object areas
-    objs_with_areas = [(meta["level"], meta["zone"], meta["area"]) 
+    objs_with_areas = [(meta["level"], meta["zone"], meta.get("dia_2_raw"), meta["area"]) 
                        for meta in element_metadata.values() if meta.get("area", 0) > 0]
     if objs_with_areas:
         summary_lines.append("")
-        summary_lines.append("Sample objects with calculated areas (first 10):")
-        for level, zone, area in objs_with_areas[:10]:
-            summary_lines.append(f"  Level={level}, Zone={zone}, Area={area} m²")
+        summary_lines.append("Sample objects with calculated areas (first 20):")
+        for level, zone, dia_raw, area in objs_with_areas[:20]:
+            # Extract numeric from dia_raw if dict
+            dia_num = dia_raw.get("value") if isinstance(dia_raw, dict) else dia_raw if dia_raw else "?"
+            summary_lines.append(f"  Level={level}, Zone={zone}, DIA-2={dia_num}, Area={area} m²")
     
     summary_lines.append("")
 
