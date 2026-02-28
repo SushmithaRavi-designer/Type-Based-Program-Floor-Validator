@@ -485,6 +485,14 @@ def automate_function(
     zone_issue_objects = []   # objects in mismatched zones (for error pin)
 
     stacking = vertical_stacking_continuity(dict(floor_data))
+    
+    # DEBUG: Count objects with actual DIA-2 values
+    objs_with_dia2 = sum(1 for meta in element_metadata.values() if meta.get("dia_2_raw") is not None)
+    objs_with_area = sum(1 for meta in element_metadata.values() if meta.get("area", 0) > 0)
+    total_area_sum = sum(meta.get("area", 0) for meta in element_metadata.values())
+    debug_info.append("")
+    debug_info.append(f"AGGREGATION SUMMARY: {len(generic_models)} objects → {objs_with_dia2} with DIA-2 → {objs_with_area} with calculated area")
+    debug_info.append(f"Total area across all objects: {total_area_sum:.2f} m²")
 
     for level, prog_areas in sorted(floor_data.items()):
         total         = sum(prog_areas.values())
@@ -558,17 +566,14 @@ def automate_function(
     summary_lines.append("── DEBUG: Extraction Details ──")
     summary_lines.extend(debug_info)
     
-    # Show sample area values
-    sample_areas = []
-    for i, (obj_id, meta) in enumerate(list(element_metadata.items())[:5]):
-        dia_val = meta.get("dia_2_raw", "?")
-        area_val = meta.get("area", 0)
-        sample_areas.append(f"  Element {i+1}: DIA-2='{dia_val}' → Area={area_val} m²")
-    
-    if sample_areas:
+    # Show sample of per-object areas
+    objs_with_areas = [(meta["level"], meta["zone"], meta["area"]) 
+                       for meta in element_metadata.values() if meta.get("area", 0) > 0]
+    if objs_with_areas:
         summary_lines.append("")
-        summary_lines.append("Sample area calculations (first 5 elements):")
-        summary_lines.extend(sample_areas)
+        summary_lines.append("Sample objects with calculated areas (first 10):")
+        for level, zone, area in objs_with_areas[:10]:
+            summary_lines.append(f"  Level={level}, Zone={zone}, Area={area} m²")
     
     summary_lines.append("")
 
