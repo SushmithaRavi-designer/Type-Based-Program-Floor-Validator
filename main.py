@@ -207,10 +207,31 @@ def automate_function(
         raw_type = get_param_value(first_obj, "Type Name") or ""
         debug_info.append(f"Sample Type Name: '{raw_type}'")
         
-        # DEBUG: Get DIA-2 and show extraction
+        # DEBUG: Get DIA-2 and show extraction from all sources
         dia2_val = get_param_value(first_obj, "DIA-2")
-        debug_info.append(f"DIA-2 raw value (with units): '{dia2_val}'")
+        debug_info.append(f"DIA-2 from get_param_value: '{dia2_val}'")
         
+        # Check type_parameters directly
+        type_params = getattr(first_obj, "type_parameters", None)
+        if type_params:
+            debug_info.append(f"type_parameters exists: {type(type_params).__name__}")
+            if isinstance(type_params, dict):
+                dia2_direct = type_params.get("DIA-2", "NOT FOUND")
+                debug_info.append(f"  DIA-2 in type_parameters: {dia2_direct}")
+                debug_info.append(f"  All type_parameters keys: {list(type_params.keys())[:10]}")
+        else:
+            debug_info.append("type_parameters: None")
+        
+        # Check parameters dict for Type Parameters section
+        params = getattr(first_obj, "parameters", None)
+        if params and isinstance(params, dict) and "Type Parameters" in params:
+            tp = params["Type Parameters"]
+            debug_info.append(f"Found nested 'Type Parameters' in parameters dict: {type(tp).__name__}")
+            if isinstance(tp, dict):
+                dia2_nested = tp.get("DIA-2", "NOT FOUND")
+                debug_info.append(f"  DIA-2 in parameters['Type Parameters']: {dia2_nested}")
+        
+        # Show extraction result
         if dia2_val:
             diameter = extract_numeric_value(dia2_val)
             debug_info.append(f"DIA-2 extracted numeric: {diameter}")
@@ -222,7 +243,7 @@ def automate_function(
                 except (ValueError, TypeError) as e:
                     debug_info.append(f"AREA CALCULATION ERROR: {e}")
         else:
-            debug_info.append("DIA-2 not found")
+            debug_info.append("DIA-2 not found in any location - Area will be 0")
         
         debug_output = "\n".join(debug_info)
 
