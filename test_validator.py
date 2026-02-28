@@ -10,15 +10,15 @@ Run with:
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from utils.parser import parse_type_name, normalize_floor_label
-from utils.kpi import (
+from parser import parse_type_name, normalize_floor_label
+from kpi import (
     shannon_diversity,
     mono_functional_check,
     check_zone_compatibility,
     vertical_stacking_continuity,
     floor_summary,
 )
-from utils.csv_exporter import rows_to_csv, COLUMNS
+from csv_exporter import rows_to_csv, COLUMNS
 
 
 # ── parser tests ───────────────────────────────────────────────────────────────
@@ -136,6 +136,25 @@ def test_full_floor_summary():
     assert s["dominant_program"] == "Retail"
     assert s["is_mono_functional"] is True
     assert s["diversity_index"] > 0
+
+
+def test_parse_thresholds_compatibility():
+    """Ensure threshold parsing survives legacy "function" wrapper and bad JSON."""
+    from main import _parse_thresholds
+
+    class Legacy:
+        def __init__(self, matrix):
+            # object with nested inputs attribute
+            self.inputs = type("X", (), {"program_threshold_matrix": matrix})
+
+    legacy = Legacy('{"Retail": 50}')
+    assert _parse_thresholds(legacy) == {"Retail": 50}
+
+    # dict-style input also accepted
+    assert _parse_thresholds({"program_threshold_matrix": '{"Office": 75}'}) == {"Office": 75}
+
+    # invalid JSON results in empty dict rather than an exception
+    assert _parse_thresholds({"program_threshold_matrix": "not json"}) == {}
 
 
 if __name__ == "__main__":
