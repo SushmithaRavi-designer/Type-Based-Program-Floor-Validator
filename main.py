@@ -443,11 +443,16 @@ def automate_function(
                         dia_2_raw = dimensions.get("DIA-2")
                         
                         if dia_2_raw is not None:
-                            # Extract numeric value
-                            diameter = extract_numeric_value(str(dia_2_raw))
-                            if diameter and diameter > 0:
+                            # DIA-2 may be a string like "60" or a dict like {"value": 60, "units": "Meters"}
+                            if isinstance(dia_2_raw, dict):
+                                dia_2_numeric = dia_2_raw.get("value")
+                            else:
+                                dia_2_numeric = extract_numeric_value(str(dia_2_raw))
+                            
+                            if dia_2_numeric and dia_2_numeric > 0:
                                 try:
                                     # Calculate circular area: A = π × (d/2)²
+                                    diameter = float(dia_2_numeric)
                                     radius = diameter / 2
                                     area = round(pi * (radius ** 2), 2)
                                 except (ValueError, TypeError):
