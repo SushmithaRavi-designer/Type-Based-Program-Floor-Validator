@@ -12,6 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5.0.0
+      - name: Fix checkout path
+        run: |
+          if [ -d "./Type-Based-Program-Floor-Validator" ]; then
+            mv ./Type-Based-Program-Floor-Validator/* ./
+            rmdir ./Type-Based-Program-Floor-Validator
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
