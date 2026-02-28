@@ -15,15 +15,15 @@ from speckle_automate import (
 )
 
 from flatten import flatten_base
-from utils.parser import parse_type_name
-from utils.kpi import (
+from parser import parse_type_name
+from kpi import (
     shannon_diversity,
     mono_functional_check,
     check_zone_compatibility,
     vertical_stacking_continuity,
 )
-from utils.csv_exporter import rows_to_csv
-from utils.extractor import get_param_value, estimate_area_from_display, get_material_color, get_level_info
+from csv_exporter import rows_to_csv
+from extractor import get_param_value, estimate_area_from_display, get_material_color, get_level_info
 
 
 # ─────────────────────────────────────────────────────────────────────────────
