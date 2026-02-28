@@ -165,41 +165,78 @@ def automate_function(
 
     # ── 2. Flatten all objects and filter Generic Models ──────────────────────
     all_objects = list(flatten_base(version_root_object))
-
+    
+    # Try filtering for Generic Models first
     generic_models = [
         obj for obj in all_objects
         if "Generic Model" in str(getattr(obj, "category", ""))
     ]
+    
+    # If no Generic Models found, try other common categories
+    if not generic_models:
+        # Try filtering by type or speckle_type
+        generic_models = [
+            obj for obj in all_objects
+            if getattr(obj, "speckle_type", "").lower() in ["revitgenericmodel", "revitfamilyinstance"]
+            and hasattr(obj, "parameters")
+        ]
+    
+    # If still no results, just take all objects with parameters
+    if not generic_models:
+        generic_models = [
+            obj for obj in all_objects
+            if hasattr(obj, "parameters") and not getattr(obj, "category", "").startswith("System")
+        ]
 
     if not generic_models:
         automate_context.mark_run_failed(
-            "No Generic Model elements found. "
-            "Ensure the commit contains Revit Generic Model objects."
+            f"No processable elements found. Total objects: {len(all_objects)}. "
+            "Checked for Generic Models, family instances, and parametric objects. "
+            "Ensure your model contains Revit elements with parameters."
         )
         return
 
     # ── 2.5. Debug: Inspect available parameters in first element ──────────────
     # This helps identify what parameters are actually available in the model
+    debug_info = []
     if generic_models:
         first_obj = generic_models[0]
-        available_params = set()
         
         # Get direct attributes
-        for attr in dir(first_obj):
-            if not attr.startswith("_"):
-                available_params.add(attr)
+        debug_info.append(f"First object type: {type(first_obj).__name__}")
+        debug_info.append(f"Object class: {first_obj.__class__.__module__}.{first_obj.__class__.__name__}")
         
-        # Get parameters dict keys
+        # List all direct attributes (non-private)
+        direct_attrs = [attr for attr in dir(first_obj) if not attr.startswith("_")]
+        debug_info.append(f"Direct attributes: {', '.join(direct_attrs[:15])}")
+        
+        # Get parameters dict structure
         params = getattr(first_obj, "parameters", None)
-        if isinstance(params, dict):
-            available_params.update(params.keys())
+        if params:
+            debug_info.append(f"Parameters object type: {type(params).__name__}")
+            if isinstance(params, dict):
+                param_keys = list(params.keys())
+                debug_info.append(f"Parameter keys: {param_keys[:10]}")
+                # Show structure of first param
+                if param_keys:
+                    first_key = param_keys[0]
+                    first_val = params[first_key]
+                    debug_info.append(f"Example param '{first_key}': {first_val}")
+            else:
+                # DynamicBase-style parameters
+                param_attrs = [k for k in dir(params) if not k.startswith("_")]
+                debug_info.append(f"Parameter attributes: {param_attrs[:10]}")
+        else:
+            debug_info.append("No 'parameters' object found")
         
-        # Log diagnostic info (visible in automation context)
-        debug_msg = (
-            f"Available element attributes (first object sample): "
-            f"{', '.join(sorted(list(available_params)[:20]))} ... "
-            f"(showing first 20 of {len(available_params)})"
-        )
+        # Check for common properties
+        for prop_name in ["Type", "type", "name", "Type Name", "category", "speckle_type", "level", "levelName"]:
+            val = getattr(first_obj, prop_name, None)
+            if val:
+                debug_info.append(f"  - {prop_name}: {val}")
+        
+        # Store debug info for later output
+        debug_output = "\n".join(debug_info)
 
     # ── 3. Parse threshold matrix from JSON input and apply threshold mode ────
     try:
@@ -229,6 +266,18 @@ def automate_function(
     for obj in generic_models:
         # Program (from Type Name or chosen parameter)
         raw_type = get_param_value(obj, function_inputs.program_source_parameter) or ""
+        
+        # If still empty, try common alternative names
+        if not raw_type:
+            for alt_name in ["Type Name", "Family Type", "Type", "Name", "name", "typeName"]:
+                raw_type = get_param_value(obj, alt_name)
+                if raw_type:
+                    break
+        
+        # Last resort: try direct attributes
+        if not raw_type:
+            raw_type = getattr(obj, "Type Name", "") or getattr(obj, "type_name", "") or getattr(obj, "name", "") or ""
+        
         program, zone_from_name, floor_from_name = parse_type_name(raw_type)
 
         # Zone: prefer explicit parameter, fall back to parsed zone
@@ -355,6 +404,11 @@ def automate_function(
         f"across {len(floor_data)} levels and {len(zone_data)} zones.",
         "",
     ]
+
+    # ALWAYS include debug info in summary for troubleshooting
+    summary_lines.append("── DEBUG: Element Structure ──")
+    summary_lines.extend(debug_info)
+    summary_lines.append("")
 
     # Include material colors based on report level (detailed or verbose only)
     if material_colors and function_inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
