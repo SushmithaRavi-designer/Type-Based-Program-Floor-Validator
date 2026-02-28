@@ -17,12 +17,11 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
       1. Direct attribute on obj (exact and case-insensitive)
       2. obj.type_parameters (Type Parameters in Revit)
       3. obj.parameters as a plain dict {key: value}
-      4. obj.parameters as a nested dict {key: {"name": ..., "value": ...}}
-      5. Parameter wrapped with units: {"value": 60, "unit": "Meters"}
-      6. obj.parameters["Type Parameters"] nested dict
-      7. obj.parameters as a Speckle DynamicBase whose child attributes
-         are objects with .name / .value properties
-      8. Alternative parameter names (replace hyphen with underscore, etc.)
+      4. obj.parameters["Type Parameters"] (nested in Type Parameters section)
+      5. obj.parameters["Type Parameters"]["Dimensions"] (nested under Dimensions)
+      6. obj.parameters as nested dict {key: {"name": ..., "value": ...}}
+      7. Parameter wrapped with units: {"value": 60, "unit": "Meters"}
+      8. DynamicBase-style parameters
     """
     if obj is None:
         return None
@@ -42,13 +41,23 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
     # 2. Check type_parameters (Revit Type Parameters)
     type_params = getattr(obj, "type_parameters", None)
     if isinstance(type_params, dict):
-        # Exact match
+        # Try direct key
         if param_name in type_params:
             entry = type_params[param_name]
             if isinstance(entry, dict):
                 val = entry.get("value")
                 return str(val) if val is not None else None
             return str(entry) if entry is not None else None
+        
+        # Try nested under Dimensions
+        dimensions = type_params.get("Dimensions", {})
+        if isinstance(dimensions, dict):
+            if param_name in dimensions:
+                entry = dimensions[param_name]
+                if isinstance(entry, dict):
+                    val = entry.get("value")
+                    return str(val) if val is not None else None
+                return str(entry) if entry is not None else None
         
         # Case-insensitive match
         for key, entry in type_params.items():
@@ -67,12 +76,10 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
         # Exact match first
         if param_name in params:
             entry = params[param_name]
-            # Handle wrapped value with unit: {"value": 60, "unit": "Meters"}
             if isinstance(entry, dict):
                 val = entry.get("value")
                 if val is not None:
                     return str(val)
-                # Also try nested name/value structure
                 return str(entry.get("value", "")) or None
             return str(entry) if entry is not None else None
         
@@ -86,7 +93,37 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
                     return str(entry.get("value", "")) or None
                 return str(entry) if entry is not None else None
         
-        # 6. Try alternative naming (replace hyphen with underscore)
+        # 4. Check nested "Type Parameters" dict within parameters
+        if "Type Parameters" in params:
+            type_params_nested = params["Type Parameters"]
+            if isinstance(type_params_nested, dict):
+                # Try direct key
+                if param_name in type_params_nested:
+                    entry = type_params_nested[param_name]
+                    if isinstance(entry, dict):
+                        val = entry.get("value")
+                        return str(val) if val is not None else None
+                    return str(entry) if entry is not None else None
+                
+                # 5. Try nested under Dimensions in Type Parameters
+                dimensions = type_params_nested.get("Dimensions", {})
+                if isinstance(dimensions, dict):
+                    if param_name in dimensions:
+                        entry = dimensions[param_name]
+                        if isinstance(entry, dict):
+                            val = entry.get("value")
+                            return str(val) if val is not None else None
+                        return str(entry) if entry is not None else None
+                
+                # Case-insensitive match in type parameters
+                for key, entry in type_params_nested.items():
+                    if isinstance(key, str) and key.lower() == param_name.lower():
+                        if isinstance(entry, dict):
+                            val = entry.get("value")
+                            return str(val) if val is not None else None
+                        return str(entry) if entry is not None else None
+        
+        # Try alternative naming (replace hyphen with underscore)
         alt_param_name = param_name.replace("-", "_")
         if alt_param_name != param_name and alt_param_name in params:
             entry = params[alt_param_name]
@@ -96,35 +133,15 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
                     return str(val)
             return str(entry) if entry is not None else None
         
-        # 7. Search by nested name key (original behavior)
+        # 6. Search by nested name key (original behavior)
         for entry in params.values():
             if isinstance(entry, dict):
                 if entry.get("name", "").lower() == param_name.lower():
                     val = entry.get("value")
                     if val is not None:
                         return str(val)
-        
-        # 8. Check nested "Type Parameters" dict within parameters
-        if "Type Parameters" in params:
-            type_params_nested = params["Type Parameters"]
-            if isinstance(type_params_nested, dict):
-                # Exact match
-                if param_name in type_params_nested:
-                    entry = type_params_nested[param_name]
-                    if isinstance(entry, dict):
-                        val = entry.get("value")
-                        return str(val) if val is not None else None
-                    return str(entry) if entry is not None else None
-                
-                # Case-insensitive match
-                for key, entry in type_params_nested.items():
-                    if isinstance(key, str) and key.lower() == param_name.lower():
-                        if isinstance(entry, dict):
-                            val = entry.get("value")
-                            return str(val) if val is not None else None
-                        return str(entry) if entry is not None else None
 
-    # 7. DynamicBase-style parameters object
+    # 8. DynamicBase-style parameters object
     else:
         for key in _safe_dir(params):
             p = getattr(params, key, None)
