@@ -36,9 +36,11 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
                 return str(val)
 
     # 2. PRIMARY: Check obj.properties.parameters["Type Parameters"]["Dimensions"]
+    # NOTE: Key may be "parameters", "Parameters", or "type_parameters"
     properties = getattr(obj, "properties", None)
     if isinstance(properties, dict):
-        params_prop = properties.get("parameters")
+        # Try all case variations of parameters key
+        params_prop = properties.get("parameters") or properties.get("Parameters") or properties.get("type_parameters") or properties.get("Type_Parameters")
         if isinstance(params_prop, dict):
             type_params_nested = params_prop.get("Type Parameters")
             if isinstance(type_params_nested, dict):
@@ -50,8 +52,8 @@ def get_param_value(obj, param_name: str) -> Optional[str]:
                         return str(val) if val is not None else None
                     return str(entry) if entry is not None else None
         
-        # Also check properties["type_parameters"]
-        type_params = properties.get("type_parameters")
+        # Also check properties["type_parameters"] variations
+        type_params = properties.get("type_parameters") or properties.get("Type_Parameters") or properties.get("TypeParameters")
         if isinstance(type_params, dict):
             if param_name in type_params:
                 entry = type_params[param_name]

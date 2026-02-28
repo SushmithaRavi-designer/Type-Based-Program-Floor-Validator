@@ -34,16 +34,18 @@ def _has_parameter_data_in_properties(obj) -> bool:
     properties = getattr(obj, "properties", None)
     # Accept both dict-style and object-style properties
     if isinstance(properties, dict):
-        if properties.get("parameters") is not None or properties.get("type_parameters") is not None:
+        # Try both 'parameters' and 'Parameters' (case variations)
+        if properties.get("parameters") is not None or properties.get("Parameters") is not None or properties.get("type_parameters") is not None:
             return True
-        params = properties.get("parameters", {})
+        # Check for Type Parameters section (try both cases)
+        params = properties.get("parameters") or properties.get("Parameters")
         if isinstance(params, dict) and "Type Parameters" in params:
             return True
         return False
 
     # If properties is an object-like (DynamicBase), try attribute access
     if properties is not None:
-        params = getattr(properties, "parameters", None)
+        params = getattr(properties, "parameters", None) or getattr(properties, "Parameters", None)
         type_params = getattr(properties, "type_parameters", None)
         if params is not None or type_params is not None:
             return True
@@ -306,26 +308,30 @@ def automate_function(
             debug_info.append(f"properties exists: True (dict)")
             debug_info.append(f"properties keys: {list(properties.keys())[:20]}")  # Show first 20 keys
             
-            props_params = properties.get("parameters")
+            # Try both 'parameters' and 'Parameters' (case variations)
+            props_params = properties.get("parameters") or properties.get("Parameters")
             props_type_params = properties.get("type_parameters")
-            debug_info.append(f"properties['parameters']: {props_params is not None}")
+            debug_info.append(f"properties['Parameters']: {props_params is not None}")
             debug_info.append(f"properties['type_parameters']: {props_type_params is not None}")
+            
+            if isinstance(props_params, dict):
+                debug_info.append(f"  Parameters type: dict")
+                debug_info.append(f"  Parameters keys: {list(props_params.keys())}")
+                if "Type Parameters" in props_params:
+                    tp = props_params.get("Type Parameters", {})
+                    if isinstance(tp, dict):
+                        debug_info.append(f"  Type Parameters keys: {list(tp.keys())}")
+                        if "Dimensions" in tp:
+                            dims = tp.get("Dimensions", {})
+                            if isinstance(dims, dict):
+                                debug_info.append(f"    Dimensions keys: {list(dims.keys())}")
+                                dia_val = dims.get("DIA-2")
+                                debug_info.append(f"    DIA-2 value: {dia_val}")
             
             # Try to find DIA-2 in any nested location
             for key in properties.keys():
                 if "DIA" in key.upper() or "dimension" in key.lower():
-                    debug_info.append(f"  Found DIA-like key: '{key}' = {properties[key]}")
-            
-            if isinstance(props_params, dict):
-                debug_info.append(f"  parameters keys: {list(props_params.keys())}")
-                if "Type Parameters" in props_params:
-                    tp = props_params.get("Type Parameters", {})
-                    if isinstance(tp, dict) and "Dimensions" in tp:
-                        dims = tp.get("Dimensions", {})
-                        if isinstance(dims, dict):
-                            debug_info.append(f"  Dimensions keys: {list(dims.keys())}")
-                            dia_val = dims.get("DIA-2")
-                            debug_info.append(f"  DIA-2 in dimensions: {dia_val}")
+                    debug_info.append(f"  Found key with DIA/dimension: '{key}'")
         elif properties is not None:
             debug_info.append(f"properties exists: True (object, not dict)")
             try:
