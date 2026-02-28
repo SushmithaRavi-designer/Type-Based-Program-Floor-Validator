@@ -4,6 +4,8 @@ Use the automation_context module to wrap your function in an Automate context h
 """
 
 import json
+import os
+import tempfile
 from collections import defaultdict
 from enum import Enum
 
@@ -376,11 +378,23 @@ def automate_function(
 
     # ── 10. Export CSV file result ────────────────────────────────────────────
     csv_content = rows_to_csv(csv_rows)
-    automate_context.store_file_result(
-        "program_floor_validation.csv",
-        csv_content.encode("utf-8"),
-        "text/csv",
-    )
+    
+    # Write CSV to temporary file (speckle-automate expects a file path, not bytes)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".csv",
+        delete=False,
+        prefix="program_floor_validation_"
+    ) as tmp_file:
+        tmp_file.write(csv_content)
+        tmp_path = tmp_file.name
+    
+    try:
+        automate_context.store_file_result(tmp_path)
+    finally:
+        # Clean up temporary file
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
     # Show offending objects in the Speckle viewer
     if issues:
