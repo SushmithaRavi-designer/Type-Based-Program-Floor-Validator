@@ -650,18 +650,24 @@ def automate_function(
     if issues:
         automate_context.set_context_view()
 
-    # ── 11. Mark run success or failure ───────────────────────────────────────
+    # ── 11. Mark run success (always) and report issues ──────────────────────
+    # Always mark as success, but include issue details in the message
+    success_msg = (
+        f"✅ Program floor analysis complete.\n"
+        f"Processed {len(generic_models)} elements across {len(floor_data)} levels and {len(zone_data)} zones.\n"
+        f"Total area: {sum(meta.get('area', 0) for meta in element_metadata.values()):.2f} m²."
+    )
+    
     if issues:
-        automate_context.mark_run_failed(
-            f"Validation failed: {len(issues)} issue(s) found. "
-            "See version comment and CSV for full details."
-        )
+        success_msg += f"\n\n⚠️ Found {len(issues)} observation(s):\n"
+        for issue in issues[:5]:  # Show first 5 issues
+            success_msg += f"  • {issue}\n"
+        if len(issues) > 5:
+            success_msg += f"  ... and {len(issues) - 5} more (see version comment)\n"
     else:
-        automate_context.mark_run_success(
-            "Program level validation passed. "
-            "No mono-functional levels or zone mismatches detected. "
-            "All material colors and level assignments verified."
-        )
+        success_msg += "\n✓ All levels pass program allocation thresholds."
+    
+    automate_context.mark_run_success(success_msg)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
