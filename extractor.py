@@ -96,52 +96,60 @@ def get_material_color(obj, color_param_name: str = "Material") -> Optional[str]
     """
     Extract material color information from a Speckle object.
 
-    Attempts to find color from:
-      1. Direct color parameter or property (Color, colour, Colour)
-      2. Material-related properties
-      3. Render material properties
-      4. Display color attributes
-      5. Parameter with alternative names (Colour, Material Color, etc.)
+    Attempts to find color from (in priority order):
+      1. Material object with RGB/color properties (from Revit)
+      2. Render material properties with diffuse/color
+      3. Display/graphics override colors
+      4. Direct color attributes
+      5. Material name parameter
 
     Returns color as hex string (e.g., "FF0000") or None if not found.
     """
     if obj is None:
         return None
 
-    # Try color parameter directly (exact and case-insensitive)
-    for color_name in ["Color", "colour", "Colour", "COLOUR"]:
-        color_val = get_param_value(obj, color_name)
-        if color_val:
-            return _normalize_hex_color(color_val)
-
-    # Try direct color attributes
-    for color_attr in ["color", "colour", "Color", "displayColor", "materialColor", "fillColor"]:
-        color_val = getattr(obj, color_attr, None)
-        if color_val:
-            return _normalize_hex_color(color_val)
-
-    # Try material.color or render material properties
+    # Priority 1: Try material object (Revit Material with RGB color)
     material = getattr(obj, "material", None)
     if material:
-        # Material name lookup or direct color
-        material_name = getattr(material, "name", None)
+        # Try direct material color property
         material_color = getattr(material, "color", None)
         if material_color:
             return _normalize_hex_color(material_color)
+        
+        # Try material.diffuse (render material color)
+        diffuse = getattr(material, "diffuse", None)
+        if diffuse:
+            return _normalize_hex_color(diffuse)
 
-    # Try render material properties
+    # Priority 2: Try render material properties (Revit RenderMaterial)
     render_material = getattr(obj, "renderMaterial", None)
     if render_material:
         render_color = getattr(render_material, "diffuse", None)
         if render_color:
             return _normalize_hex_color(render_color)
+        
+        render_color = getattr(render_material, "color", None)
+        if render_color:
+            return _normalize_hex_color(render_color)
 
-    # Try display color / graphics override color
+    # Priority 3: Try display color / graphics override color
     display_color = getattr(obj, "displayColor", None)
     if display_color:
         return _normalize_hex_color(display_color)
 
-    # Try material parameter directly with various names
+    # Priority 4: Try direct color attributes
+    for color_attr in ["color", "Color", "materialColor", "fillColor"]:
+        color_val = getattr(obj, color_attr, None)
+        if color_val:
+            return _normalize_hex_color(color_val)
+
+    # Priority 5: Try color parameter directly (case-insensitive)
+    for color_name in ["Color", "colour", "Colour", "COLOUR"]:
+        color_val = get_param_value(obj, color_name)
+        if color_val:
+            return _normalize_hex_color(color_val)
+
+    # Priority 6: Try material parameter with various names
     for material_name in [color_param_name, "Material", "Material Color", "MaterialColor", "Finish", "Surface"]:
         material_str = get_param_value(obj, material_name)
         if material_str:
@@ -243,6 +251,7 @@ def _normalize_hex_color(color_input) -> Optional[str]:
     Normalize various color formats to a 6-digit hex string.
 
     Handles:
+      - Revit Color objects with R, G, B properties
       - Hex strings: "#FF0000", "FF0000", "0xFF0000"
       - RGB tuples/lists: (255, 0, 0), [255, 0, 0]
       - RGB dicts: {"r": 255, "g": 0, "b": 0}
@@ -253,6 +262,19 @@ def _normalize_hex_color(color_input) -> Optional[str]:
     """
     if color_input is None:
         return None
+    
+    # Handle Revit Color object (has R, G, B properties)
+    if hasattr(color_input, 'r') and hasattr(color_input, 'g') and hasattr(color_input, 'b'):
+        try:
+            r = int(getattr(color_input, 'r', 0))
+            g = int(getattr(color_input, 'g', 0))
+            b = int(getattr(color_input, 'b', 0))
+            r = max(0, min(255, r))
+            g = max(0, min(255, g))
+            b = max(0, min(255, b))
+            return f"{r:02X}{g:02X}{b:02X}"
+        except (ValueError, TypeError):
+            pass
 
     # Handle string hex colors
     if isinstance(color_input, str):

@@ -19,23 +19,28 @@ def parse_type_name(type_name: str) -> Tuple[str, str, str]:
     """
     Split a Revit Type Name into (program, zone, floor).
 
+    Expects format: Program_Zone_Floor (e.g., "MEDICAL_ZoneA_LEVEL10")
+
     Parameters
     ----------
     type_name : str
-        Raw value from the Type Name parameter, e.g. "Retail_ZoneA_L2".
+        Raw value from the Type Name parameter, e.g. "MEDICAL_ZoneA_LEVEL10".
 
     Returns
     -------
     (program, zone, floor) : Tuple[str, str, str]
-        Each value is a non-empty string; falls back to "Unknown".
+        Each value is a non-empty string; parts not found default to "Unknown".
 
     Examples
     --------
-    >>> parse_type_name("Retail_ZoneA_L2")
-    ('Retail', 'ZoneA', 'L2')
+    >>> parse_type_name("MEDICAL_ZoneA_LEVEL10")
+    ('MEDICAL', 'ZoneA', 'LEVEL10')
 
-    >>> parse_type_name("Office_L3")
-    ('Office', 'Unknown', 'L3')
+    >>> parse_type_name("TRANS HQ_ZoneB_LEVEL11")
+    ('TRANS HQ', 'ZoneB', 'LEVEL11')
+
+    >>> parse_type_name("OFFICE_L2")
+    ('OFFICE', 'Unknown', 'L2')
 
     >>> parse_type_name("Housing")
     ('Housing', 'Unknown', 'Unknown')
@@ -46,12 +51,21 @@ def parse_type_name(type_name: str) -> Tuple[str, str, str]:
     if not type_name or not type_name.strip():
         return ("Unknown", "Unknown", "Unknown")
 
+    # Split by underscore (case-sensitive, preserves spaces in program names like "TRANS HQ")
     parts = [p.strip() for p in type_name.strip().split("_") if p.strip()]
 
     if len(parts) >= 3:
+        # Program_Zone_Floor
         return (parts[0], parts[1], parts[2])
     elif len(parts) == 2:
-        return (parts[0], "Unknown", parts[1])
+        # Ambiguous: could be Program_Floor or Program_Zone
+        # Assumption: if second part looks like a level (starts with L or LEVEL), treat as Program_Floor
+        second = parts[1].upper()
+        if second.startswith("L") or second.startswith("LEVEL"):
+            return (parts[0], "Unknown", parts[1])
+        else:
+            # Could be Program_Zone, but uncertain
+            return (parts[0], "Unknown", parts[1])
     elif len(parts) == 1:
         return (parts[0], "Unknown", "Unknown")
     else:

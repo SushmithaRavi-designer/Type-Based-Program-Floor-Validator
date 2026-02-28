@@ -8,6 +8,7 @@ import os
 import tempfile
 from collections import defaultdict
 from enum import Enum
+from math import pi
 
 from pydantic import Field
 from speckle_automate import (
@@ -264,7 +265,7 @@ def automate_function(
     element_metadata: dict = {}  # Store complete element metadata with level and color
 
     for obj in generic_models:
-        # Program (from Type Name or chosen parameter)
+        # Program/Zone/Floor extracted from Type Name (e.g., "MEDICAL_ZoneA_LEVEL10")
         raw_type = get_param_value(obj, function_inputs.program_source_parameter) or ""
         
         # If still empty, try common alternative names
@@ -278,25 +279,48 @@ def automate_function(
         if not raw_type:
             raw_type = getattr(obj, "Type Name", "") or getattr(obj, "type_name", "") or getattr(obj, "name", "") or ""
         
+        # Parse Type Name into Program, Zone, Level (e.g., "MEDICAL_ZoneA_LEVEL10" → MEDICAL, ZoneA, LEVEL10)
         program, zone_from_name, floor_from_name = parse_type_name(raw_type)
+        
+        # Zone: Use zone parsed from Type Name (underscore-separated), fallback to explicit parameter
+        zone = zone_from_name if zone_from_name != "Unknown" else get_param_value(obj, function_inputs.zone_parameter_name)
+        if not zone:
+            zone = "Unknown"
 
-        # Zone: prefer explicit parameter, fall back to parsed zone
-        zone = get_param_value(obj, function_inputs.zone_parameter_name) or zone_from_name
+        # Floor / Level: Use level parsed from Type Name, fallback to level extraction
+        level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, function_inputs.level_parameter_name)
+        if not level:
+            level = "Unknown"
 
-        # Floor / Level: use dedicated level extraction function, fall back to parsed floor
-        level = get_level_info(obj, function_inputs.level_parameter_name) or floor_from_name
-
-        # Extract material color if enabled (check Enum mode)
+        # Extract material color from Revit material object (if enabled)
         material_color = None
         if function_inputs.color_extraction_mode == ColorExtractionMode.ENABLED:
+            # First try to get from actual Revit material object
             material_color = get_material_color(obj, function_inputs.material_color_parameter_name)
+        if not material_color:
+            material_color = "Not Found"
 
-        # Area: prefer explicit parameter, fall back to geometry estimate
-        area_raw = get_param_value(obj, function_inputs.area_parameter_name)
-        try:
-            area = float(area_raw) if area_raw else 0.0
-        except (ValueError, TypeError):
-            area = 0.0
+        # Area: Try DIA-2 first (diameter of floor plate), then configured parameter, then geometry
+        area = 0.0
+        dia_2_raw = get_param_value(obj, "DIA-2")  # Get diameter value
+        if dia_2_raw:
+            try:
+                diameter = float(dia_2_raw)
+                # Calculate circular area: A = π × (d/2)²
+                radius = diameter / 2
+                area = round(pi * (radius ** 2), 2)
+            except (ValueError, TypeError):
+                area = 0.0
+        
+        # If no diameter value, try configured area parameter
+        if area == 0.0:
+            area_raw = get_param_value(obj, function_inputs.area_parameter_name)
+            try:
+                area = float(area_raw) if area_raw else 0.0
+            except (ValueError, TypeError):
+                area = 0.0
+        
+        # Fall back to geometry estimate if no parameter found
         if area == 0.0:
             area = estimate_area_from_display(obj)
 
