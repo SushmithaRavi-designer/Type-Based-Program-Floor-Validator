@@ -1,0 +1,263 @@
+"""
+utils/extractor.py
+──────────────────
+Helpers for reading parameter values from Speckle / Revit objects
+and for traversing the commit object tree.
+"""
+
+from typing import Optional
+
+
+def get_param_value(obj, param_name: str) -> Optional[str]:
+    """
+    Try every common location a Revit parameter value might live in a
+    Speckle object and return it as a string (or None if not found).
+
+    Checks (in order):
+      1. Direct attribute on obj
+      2. obj.parameters as a plain dict  {key: value}
+      3. obj.parameters as a nested dict {key: {"name": ..., "value": ...}}
+      4. obj.parameters as a Speckle DynamicBase whose child attributes
+         are objects with .name / .value properties
+    """
+    if obj is None:
+        return None
+
+    # 1. Direct attribute
+    val = getattr(obj, param_name, None)
+    if val is not None and not _is_base_like(val):
+        return str(val)
+
+    params = getattr(obj, "parameters", None)
+    if params is None:
+        return None
+
+    # 2/3. Plain dict
+    if isinstance(params, dict):
+        if param_name in params:
+            entry = params[param_name]
+            if isinstance(entry, dict):
+                return str(entry.get("value", "")) or None
+            return str(entry) if entry is not None else None
+        # Search by nested name key
+        for entry in params.values():
+            if isinstance(entry, dict):
+                if entry.get("name", "").lower() == param_name.lower():
+                    return str(entry["value"]) if entry.get("value") is not None else None
+
+    # 4. DynamicBase-style parameters object
+    else:
+        for key in _safe_dir(params):
+            p = getattr(params, key, None)
+            if p is None:
+                continue
+            name = getattr(p, "name", None)
+            if name and name.lower() == param_name.lower():
+                value = getattr(p, "value", None)
+                return str(value) if value is not None else None
+
+    return None
+
+
+def collect_objects(obj, results: list):
+    """
+    Recursively walk a Speckle object tree and accumulate every
+    Base-like object into `results`.
+    """
+    results.append(obj)
+    for key in _safe_dir(obj):
+        val = getattr(obj, key, None)
+        if _is_base_like(val):
+            collect_objects(val, results)
+        elif isinstance(val, list):
+            for item in val:
+                if _is_base_like(item):
+                    collect_objects(item, results)
+
+
+def get_material_color(obj, color_param_name: str = "Material") -> Optional[str]:
+    """
+    Extract material color information from a Speckle object.
+
+    Attempts to find color from:
+      1. Direct color parameter or property
+      2. Material-related properties
+      3. Render material properties
+      4. Display color attributes
+
+    Returns color as hex string (e.g., "FF0000") or None if not found.
+    """
+    if obj is None:
+        return None
+
+    # Try color parameter directly
+    color_val = get_param_value(obj, "Color")
+    if color_val:
+        return _normalize_hex_color(color_val)
+
+    # Try material.color or render material properties
+    material = getattr(obj, "material", None)
+    if material:
+        # Material name lookup or direct color
+        material_name = getattr(material, "name", None)
+        material_color = getattr(material, "color", None)
+        if material_color:
+            return _normalize_hex_color(material_color)
+
+    # Try render material properties
+    render_material = getattr(obj, "renderMaterial", None)
+    if render_material:
+        render_color = getattr(render_material, "diffuse", None)
+        if render_color:
+            return _normalize_hex_color(render_color)
+
+    # Try display color / graphics override color
+    display_color = getattr(obj, "displayColor", None)
+    if display_color:
+        return _normalize_hex_color(display_color)
+
+    # Try material parameter directly
+    material_str = get_param_value(obj, color_param_name)
+    if material_str:
+        return _normalize_hex_color(material_str)
+
+    return None
+
+
+def get_level_info(obj, level_param_name: str = "Level") -> Optional[str]:
+    """
+    Extract level/floor information from a Speckle object.
+
+    Checks (in order):
+      1. Explicit level parameter (e.g., "Level", "Floor")
+      2. level.name attribute (Revit Level reference)
+      3. levelName attribute
+    """
+    if obj is None:
+        return None
+
+    # Try explicit level parameter
+    level_val = get_param_value(obj, level_param_name)
+    if level_val:
+        return level_val.strip()
+
+    # Try level object reference
+    level = getattr(obj, "level", None)
+    if level:
+        level_name = getattr(level, "name", None)
+        if level_name:
+            return level_name.strip()
+
+    # Try levelName direct property
+    level_name = getattr(obj, "levelName", None)
+    if level_name:
+        return level_name.strip()
+
+    return None
+
+
+def estimate_area_from_display(obj) -> float:
+    """
+    Rough bounding-box XY area estimate derived from the mesh vertices
+    stored in displayValue when no explicit area parameter is available.
+    """
+    try:
+        display = getattr(obj, "displayValue", None)
+        if display is None:
+            return 0.0
+        if isinstance(display, list):
+            if not display:
+                return 0.0
+            display = display[0]
+        vertices = getattr(display, "vertices", [])
+        if not vertices or len(vertices) < 9:
+            return 0.0
+        xs = vertices[0::3]
+        ys = vertices[1::3]
+        dx = max(xs) - min(xs)
+        dy = max(ys) - min(ys)
+        return round(dx * dy, 2)
+    except Exception:
+        return 0.0
+
+
+# ── Internal helpers ───────────────────────────────────────────────────────────
+
+def _safe_dir(obj) -> list:
+    try:
+        return [k for k in dir(obj) if not k.startswith("_")]
+    except Exception:
+        return []
+
+
+def _is_base_like(val) -> bool:
+    """Return True if val looks like a Speckle Base object (not a primitive)."""
+    if val is None or isinstance(val, (str, int, float, bool, bytes)):
+        return False
+    return hasattr(val, "__dict__") or hasattr(val, "id")
+
+
+def _normalize_hex_color(color_input) -> Optional[str]:
+    """
+    Normalize various color formats to a 6-digit hex string.
+
+    Handles:
+      - Hex strings: "#FF0000", "FF0000", "0xFF0000"
+      - RGB tuples/lists: (255, 0, 0), [255, 0, 0]
+      - RGB dicts: {"r": 255, "g": 0, "b": 0}
+      - Integer values: 16711680
+      - Color names (basic mapping)
+
+    Returns: "FF0000" format or None if conversion fails
+    """
+    if color_input is None:
+        return None
+
+    # Handle string hex colors
+    if isinstance(color_input, str):
+        color_input = color_input.strip()
+        # Remove common prefixes
+        if color_input.startswith("#"):
+            color_input = color_input[1:]
+        if color_input.startswith("0x") or color_input.startswith("0X"):
+            color_input = color_input[2:]
+        # Pad to 6 digits if needed
+        if len(color_input) == 6 and all(c in "0123456789ABCDEFabcdef" for c in color_input):
+            return color_input.upper()
+        return None
+
+    # Handle RGB tuple/list
+    if isinstance(color_input, (list, tuple)) and len(color_input) >= 3:
+        try:
+            r = max(0, min(255, int(color_input[0])))
+            g = max(0, min(255, int(color_input[1])))
+            b = max(0, min(255, int(color_input[2])))
+            return f"{r:02X}{g:02X}{b:02X}"
+        except (ValueError, TypeError):
+            return None
+
+    # Handle RGB dict (case-insensitive key matching)
+    if isinstance(color_input, dict):
+        try:
+            # Normalize dict keys to lowercase for matching
+            lower_dict = {k.lower() if isinstance(k, str) else k: v 
+                         for k, v in color_input.items()}
+            r = int(lower_dict.get("r", lower_dict.get("red", 0)))
+            g = int(lower_dict.get("g", lower_dict.get("green", 0)))
+            b = int(lower_dict.get("b", lower_dict.get("blue", 0)))
+            # Clamp to 0-255 range
+            r = max(0, min(255, r))
+            g = max(0, min(255, g))
+            b = max(0, min(255, b))
+            return f"{r:02X}{g:02X}{b:02X}"
+        except (ValueError, TypeError):
+            return None
+
+    # Handle integer color value
+    if isinstance(color_input, int):
+        try:
+            return f"{color_input & 0xFFFFFF:06X}"
+        except Exception:
+            return None
+
+    return None
