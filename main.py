@@ -512,6 +512,12 @@ def automate_function(
     # Validation report is exported as CSV file via store_file_result()
 
     # ── 10. Export CSV file result ────────────────────────────────────────────
+    
+    # Add debug section to CSV rows
+    csv_rows.append({ "Level": "", "Program": "=== DEBUG INFO ===", "Area": "" })
+    for debug_line in debug_info:
+        csv_rows.append({ "Level": "", "Program": debug_line, "Area": "" })
+    
     csv_content = rows_to_csv(csv_rows)
     
     # Write CSV to temporary file (speckle-automate expects a file path, not bytes)
