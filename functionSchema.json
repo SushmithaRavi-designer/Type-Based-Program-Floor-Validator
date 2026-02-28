@@ -1,0 +1,100 @@
+{
+  "$defs": {
+    "ColorExtractionMode": {
+      "description": "Material color extraction control.",
+      "enum": [
+        "enabled",
+        "disabled"
+      ],
+      "title": "ColorExtractionMode",
+      "type": "string"
+    },
+    "ReportLevel": {
+      "description": "Reporting detail level.",
+      "enum": [
+        "summary",
+        "detailed",
+        "verbose"
+      ],
+      "title": "ReportLevel",
+      "type": "string"
+    },
+    "ThresholdMode": {
+      "description": "Threshold validation mode.",
+      "enum": [
+        "strict",
+        "permissive",
+        "custom"
+      ],
+      "title": "ThresholdMode",
+      "type": "string"
+    }
+  },
+  "description": "These are function author-defined values.\n\nAutomate will make sure to supply them matching the types specified here.\nPlease use the pydantic model schema to define your inputs:\nhttps://docs.pydantic.dev/latest/usage/models/",
+  "properties": {
+    "programSourceParameter": {
+      "default": "Type Name",
+      "description": "Name of parameter containing program information (e.g., Type Name, Category)",
+      "title": "Program Source Parameter",
+      "type": "string"
+    },
+    "zoneParameterName": {
+      "default": "Zone",
+      "description": "Parameter storing zone information",
+      "title": "Zone Parameter Name",
+      "type": "string"
+    },
+    "levelParameterName": {
+      "default": "Level",
+      "description": "Parameter that defines building level",
+      "title": "Level Parameter Name",
+      "type": "string"
+    },
+    "areaParameterName": {
+      "default": "Area",
+      "description": "Parameter containing element area",
+      "title": "Area Parameter Name",
+      "type": "string"
+    },
+    "materialColorParameterName": {
+      "default": "Material",
+      "description": "Parameter containing material or color information",
+      "title": "Material Color Parameter Name",
+      "type": "string"
+    },
+    "colorExtractionMode": {
+      "$ref": "#/$defs/ColorExtractionMode",
+      "default": "enabled",
+      "description": "Enable or disable material color extraction from Speckle objects",
+      "title": "Color Extraction Mode"
+    },
+    "thresholdMode": {
+      "$ref": "#/$defs/ThresholdMode",
+      "default": "custom",
+      "description": "STRICT: Apply thresholds strictly | PERMISSIVE: Allow higher tolerance | CUSTOM: Use defined threshold matrix",
+      "title": "Threshold Mode"
+    },
+    "programThresholdMatrix": {
+      "default": "{\"Retail\": 60, \"Office\": 75, \"Housing\": 80, \"Exhibition\": 65}",
+      "description": "JSON dictionary mapping program type to its maximum allowed percentage. Example: {\"Retail\": 60, \"Office\": 75, \"Housing\": 80} | Only used when threshold_mode is CUSTOM",
+      "title": "Program Threshold Matrix (JSON)",
+      "type": "string"
+    },
+    "defaultThreshold": {
+      "default": 70.0,
+      "description": "Fallback threshold used if a program is not defined in the matrix (0-100)",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "title": "Default Threshold (%)",
+      "type": "number"
+    },
+    "reportLevel": {
+      "$ref": "#/$defs/ReportLevel",
+      "default": "detailed",
+      "description": "SUMMARY: Basic statistics only | DETAILED: Full analysis with colors and levels | VERBOSE: Include all metadata and processing details",
+      "title": "Report Detail Level"
+    }
+  },
+  "title": "FunctionInputs",
+  "type": "object"
+}
