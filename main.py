@@ -372,7 +372,7 @@ def automate_function(
             f"  Report Level: {function_inputs.report_level.value}",
         ]
 
-    automate_context.add_version_comment("\n".join(summary_lines))
+    # Validation report is exported as CSV file via store_file_result()
 
     # ── 10. Export CSV file result ────────────────────────────────────────────
     csv_content = rows_to_csv(csv_rows)
