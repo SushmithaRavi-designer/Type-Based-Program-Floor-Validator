@@ -32,19 +32,94 @@ from extractor import get_param_value, estimate_area_from_display, get_material_
 def _has_parameter_data_in_properties(obj) -> bool:
     """Check if object has parameter data nested under properties"""
     properties = getattr(obj, "properties", None)
-    if not isinstance(properties, dict):
+    # Accept both dict-style and object-style properties
+    if isinstance(properties, dict):
+        if properties.get("parameters") is not None or properties.get("type_parameters") is not None:
+            return True
+        params = properties.get("parameters", {})
+        if isinstance(params, dict) and "Type Parameters" in params:
+            return True
         return False
-    
-    # Check for parameters or type_parameters in properties
-    if properties.get("parameters") is not None or properties.get("type_parameters") is not None:
-        return True
-    
-    # Check for Type Parameters section
-    params = properties.get("parameters", {})
-    if isinstance(params, dict) and "Type Parameters" in params:
-        return True
-    
+
+    # If properties is an object-like (DynamicBase), try attribute access
+    if properties is not None:
+        params = getattr(properties, "parameters", None)
+        type_params = getattr(properties, "type_parameters", None)
+        if params is not None or type_params is not None:
+            return True
+        # Try nested structure
+        if isinstance(params, dict) and "Type Parameters" in params:
+            return True
+
     return False
+
+
+def _object_has_parameter_data(obj) -> bool:
+    """Check an object for parameter/type_parameter data in multiple locations.
+
+    This inspects:
+      - obj.parameters (dict or object)
+      - obj.type_parameters (dict or object)
+      - obj.properties.parameters or obj.properties.type_parameters
+      - obj.properties.parameters['Type Parameters']['Dimensions']
+      - obj.elements (iterate children)
+    """
+    # Direct parameters/type_parameters
+    params = getattr(obj, "parameters", None)
+    type_params = getattr(obj, "type_parameters", None)
+    if params is not None or type_params is not None:
+        return True
+
+    # properties (dict or object)
+    if _has_parameter_data_in_properties(obj):
+        return True
+
+    # elements: sometimes Revit family contains children under 'elements'
+    elems = getattr(obj, "elements", None)
+    if elems:
+        # elems may be list-like or dict-like
+        try:
+            for child in elems:
+                if _object_has_parameter_data(child):
+                    return True
+        except Exception:
+            # if not iterable, try attribute access
+            for name in dir(elems):
+                if name.startswith("_"):
+                    continue
+                try:
+                    child = getattr(elems, name)
+                    if _object_has_parameter_data(child):
+                        return True
+                except Exception:
+                    continue
+
+    return False
+
+
+def _find_processable_objects(all_objects):
+    """Return a list of objects that appear to contain parameter data.
+
+    This is intentionally permissive to compensate for variations in how the
+    Revit->Speckle connector exports parameters.
+    """
+    results = []
+    for obj in all_objects:
+        try:
+            if _object_has_parameter_data(obj):
+                results.append(obj)
+                continue
+        except Exception:
+            # Ignore inspection errors and continue
+            pass
+
+        # Also accept objects that have 'type' or 'family' and a non-empty name
+        if getattr(obj, "type", None) or getattr(obj, "family", None) or getattr(obj, "name", None):
+            # Only accept if properties exist (even empty) to avoid system objects
+            if getattr(obj, "properties", None) is not None:
+                results.append(obj)
+
+    return results
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -185,34 +260,17 @@ def automate_function(
     # ── 2. Flatten all objects and filter Generic Models ──────────────────────
     all_objects = list(flatten_base(version_root_object))
     
-    # Try filtering for Generic Models first - must have parameters data somewhere
-    generic_models = [
-        obj for obj in all_objects
+    # Find any objects that appear to contain parameter/type data. This
+    # function is deliberately permissive to handle variations in exports.
+    generic_models = _find_processable_objects(all_objects)
+
+    # Prefer objects categorized as Generic Models if present
+    generic_models_prefer = [
+        obj for obj in generic_models
         if "Generic Model" in str(getattr(obj, "category", ""))
-        and (
-            # Has parameters or type_parameters directly
-            (hasattr(obj, "parameters") and getattr(obj, "parameters") is not None)
-            or (hasattr(obj, "type_parameters") and getattr(obj, "type_parameters") is not None)
-            # OR has properties with parameter data
-            or _has_parameter_data_in_properties(obj)
-        )
     ]
-    
-    # If no Generic Models found, try any object with type/family + parameter data
-    if not generic_models:
-        generic_models = [
-            obj for obj in all_objects
-            if (getattr(obj, "type", None) or getattr(obj, "family", None))
-            and _has_parameter_data_in_properties(obj)
-            and "System" not in str(getattr(obj, "category", ""))
-        ]
-    
-    # Last resort: any object with properties containing parameters
-    if not generic_models:
-        generic_models = [
-            obj for obj in all_objects
-            if _has_parameter_data_in_properties(obj)
-        ]
+    if generic_models_prefer:
+        generic_models = generic_models_prefer
 
     if not generic_models:
         automate_context.mark_run_failed(
