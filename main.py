@@ -324,14 +324,7 @@ def automate_function(
             message="This zone has an incompatible program allocation.",
         )
 
-    # ── 8. Add version tags ───────────────────────────────────────────────────
-    automate_context.add_version_tag("validated")
-    if mono_floor_objects:
-        automate_context.add_version_tag("mono-functional-floor")
-    if zone_issue_objects:
-        automate_context.add_version_tag("zone-mismatch")
-
-    # ── 9. Write version comment (with report_level control) ─────────────────
+    # ── 8. Write version comment (with report_level control) ──────────────────
     summary_lines = [
         f"✅ Analysed {len(generic_models)} Generic Model elements "
         f"across {len(floor_data)} levels and {len(zone_data)} zones.",
