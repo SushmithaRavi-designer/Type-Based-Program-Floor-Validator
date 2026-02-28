@@ -48,26 +48,23 @@ jobs:
           pip install .[dev]
       - name: Extract functionInputSchema
         id: extract_schema
-        shell: bash
         run: |
-          echo "Generating schema..."
-          python3 << 'EOF'
+          python3 -c "
 import sys
 import json
 sys.path.insert(0, '.')
-
 try:
     from main import FunctionInputs
     schema = FunctionInputs.model_json_schema()
     with open('functionSchema.json', 'w') as f:
         json.dump(schema, f, indent=2)
-    print("✅ Schema generated successfully")
+    print('✅ Schema generated successfully')
 except Exception as e:
-    print(f"❌ Error generating schema: {e}")
+    print(f'❌ Error generating schema: {e}')
     import traceback
     traceback.print_exc()
     sys.exit(1)
-EOF
+"
       - name: Speckle Automate Function - Build and Publish
         uses: specklesystems/speckle-automate-github-composite-action@0.8.1
         with:
