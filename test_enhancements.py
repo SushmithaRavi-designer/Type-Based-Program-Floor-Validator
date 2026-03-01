@@ -19,7 +19,7 @@ test_cases = [
 
 for input_type, expected in test_cases:
     result = parse_type_name(input_type)
-    status = "✓" if result == expected else "✗"
+    status = "PASS" if result == expected else "FAIL"
     print(f"{status} parse_type_name('{input_type}')")
     print(f"   Expected: {expected}")
     print(f"   Got:      {result}")
@@ -51,7 +51,7 @@ color_tests = [
 
 for color_input, expected, desc in color_tests:
     result = _normalize_hex_color(color_input)
-    status = "✓" if result == expected else "✗"
+    status = "PASS" if result == expected else "FAIL"
     print(f"{status} {desc}")
     print(f"   Expected: {expected}")
     print(f"   Got:      {result}")

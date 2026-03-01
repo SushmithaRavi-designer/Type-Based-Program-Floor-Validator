@@ -173,8 +173,8 @@ if __name__ == "__main__":
     for t in tests:
         try:
             t()
-            print(f"  ✅ {t.__name__}")
+            print(f"  PASS {t.__name__}")
             passed += 1
         except Exception as e:
-            print(f"  ❌ {t.__name__}: {e}")
+            print(f"  FAIL {t.__name__}: {e}")
     print(f"\n{passed}/{len(tests)} tests passed.")

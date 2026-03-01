@@ -389,11 +389,11 @@ def automate_function(
                 try:
                     radius = diameter / 2
                     calc_area = round(pi * (radius ** 2), 2)
-                    debug_info.append(f"✓ AREA CALCULATION SUCCESS: DIA-2={diameter} → area={calc_area} m²")
+                    debug_info.append(f"SUCCESS: DIA-2={diameter} -> area={calc_area} m2")
                 except (ValueError, TypeError) as e:
                     debug_info.append(f"AREA CALCULATION ERROR: {e}")
         else:
-            debug_info.append("✗ DIA-2 not found - Area will be 0")
+            debug_info.append("NOTICE: DIA-2 not found - Area will be 0")
         
         debug_output = "\n".join(debug_info)
 
@@ -668,12 +668,7 @@ def automate_function(
 
     # Validation report is exported as CSV file via store_file_result()
 
-    # ── 10. Export CSV file result ────────────────────────────────────────────
-    
-    # Add debug section to CSV rows
-    csv_rows.append({ "Level": "", "Program": "=== DEBUG INFO ===", "Area": "" })
-    for debug_line in debug_info:
-        csv_rows.append({ "Level": "", "Program": debug_line, "Area": "" })
+    # ── 10. Export Excel file result ────────────────────────────────────────────
     
     csv_content = rows_to_excel(csv_rows)
     

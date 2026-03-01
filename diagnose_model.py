@@ -153,7 +153,7 @@ def show_property_sources(obj):
         if hasattr(obj, prop_name):
             val = getattr(obj, prop_name, None)
             if val and not callable(val):
-                print(f"✓ Direct attribute: {prop_name} = {val}")
+                print(f"FOUND: Direct attribute: {prop_name} = {val}")
                 found = True
         
         # Check parameters dict
@@ -161,18 +161,18 @@ def show_property_sources(obj):
         if isinstance(params, dict):
             if prop_name in params:
                 val = params[prop_name]
-                print(f"✓ Parameter dict: {prop_name} = {val}")
+                print(f"FOUND: Parameter dict: {prop_name} = {val}")
                 found = True
             # Check nested structure
             for key, entry in list(params.items())[:5]:
                 if isinstance(entry, dict) and entry.get("name") == prop_name:
                     val = entry.get("value")
-                    print(f"✓ Parameter nested: {prop_name} = {val}")
+                    print(f"FOUND: Parameter nested: {prop_name} = {val}")
                     found = True
                     break
         
         if not found:
-            print(f"✗ {prop_name}: NOT FOUND")
+            print(f"NOT FOUND: {prop_name}")
     
     print()
     print("=" * 80)
