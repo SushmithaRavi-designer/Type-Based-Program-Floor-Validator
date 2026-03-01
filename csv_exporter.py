@@ -8,8 +8,6 @@ import csv
 import io
 import tempfile
 from typing import List, Dict
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill
 
 
 COLUMNS = [
@@ -61,6 +59,9 @@ def rows_to_excel(rows: List[Dict], filename: str = None) -> str:
     -------
     str  Path to the Excel file.
     """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    
     wb = Workbook()
     ws = wb.active
     ws.title = "Program Floor Analysis"
