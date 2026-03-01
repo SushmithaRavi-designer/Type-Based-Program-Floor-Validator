@@ -668,7 +668,25 @@ def automate_function(
 
     # Validation report is exported as CSV file via store_file_result()
 
-    # ── 10. Export Excel file result ────────────────────────────────────────────
+    # ── 10. Add aggregation summary to Excel ──────────────────────────────────
+    
+    # Calculate summary statistics
+    total_area = sum(meta.get('area', 0) for meta in element_metadata.values())
+    ok_count = sum(1 for row in csv_rows if row.get("Status") == "OK")
+    mono_count = sum(1 for row in csv_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
+    unique_levels = len(set(row.get("Level", "") for row in csv_rows if row.get("Level")))
+    unique_programs = len(set(row.get("Program", "") for row in csv_rows if row.get("Program")))
+    
+    # Add summary separator and data
+    csv_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
+    csv_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
+    csv_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(total_area, 2), "Status": ""})
+    csv_rows.append({"Level": "Total Levels", "Program": "", "Area": unique_levels, "Status": ""})
+    csv_rows.append({"Level": "Total Programs", "Program": "", "Area": unique_programs, "Status": ""})
+    csv_rows.append({"Level": "OK Entries", "Program": "", "Area": ok_count, "Status": ""})
+    csv_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": mono_count, "Status": ""})
+
+    # ── 11. Export Excel file result ──────────────────────────────────────────
     
     csv_content = rows_to_excel(csv_rows)
     
@@ -684,12 +702,12 @@ def automate_function(
     if issues:
         automate_context.set_context_view()
 
-    # ── 11. Mark run success (always) ──────────────────────
+    # ── 12. Mark run success (always) ──────────────────────
     # Show only basic completion info in Speckle, details exported to Excel
     success_msg = (
-        f"✅ Program floor analysis complete.\n"
+        f"Program floor analysis complete.\n"
         f"Processed {len(generic_models)} elements across {len(floor_data)} levels and {len(zone_data)} zones.\n"
-        f"Total area: {sum(meta.get('area', 0) for meta in element_metadata.values()):.2f} m²."
+        f"Total area: {sum(meta.get('area', 0) for meta in element_metadata.values()):.2f} m2."
     )
     
     automate_context.mark_run_success(success_msg)
