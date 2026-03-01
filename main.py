@@ -559,13 +559,13 @@ def automate_function(
         )
 
         if is_mono:
-            level_status = f"⚠️ MONO-FUNCTIONAL ({dom_pct:.1f}% > {allowed}%)"
+            level_status = f"MONO-FUNCTIONAL ({dom_pct:.1f}% > {allowed}%)"
             issues.append(
                 f"Level {level} exceeds mono-functional threshold "
                 f"({dominant} = {dom_pct:.1f}%, limit = {allowed}%)."
             )
         else:
-            level_status = "✅ OK"
+            level_status = "OK"
 
         for program, area in sorted(prog_areas.items()):
             

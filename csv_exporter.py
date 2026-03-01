@@ -167,7 +167,7 @@ def rows_to_floor_summary_csv(floor_data: dict, stacking: dict, thresholds: dict
             "Dominant Program":    s["dominant_program"],
             "Dominant %":          s["dominant_pct"],
             "Allowed %":           s["allowed_pct"],
-            "Mono-Functional?":    "YES ⚠️" if s["is_mono_functional"] else "NO ✅",
+            "Mono-Functional?":    "YES" if s["is_mono_functional"] else "NO",
             "Diversity Index (H)": s["diversity_index"],
         })
     return buf.getvalue()
