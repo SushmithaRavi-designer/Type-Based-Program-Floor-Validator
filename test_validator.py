@@ -105,7 +105,7 @@ def test_csv_columns():
         "Floor": "L2", "Zone": "ZoneA", "Program": "Retail",
         "Area": 450.0, "%": 82.0, "Dominant": "Retail",
         "Diversity Index (H)": 0.5, "Vertical Continuity": 0.67,
-        "Status": "⚠️ MONO-FUNCTIONAL",
+        "Status": "MONO-FUNCTIONAL",
     }
     csv_text = rows_to_csv([row])
     first_line = csv_text.splitlines()[0]
@@ -117,7 +117,7 @@ def test_csv_values():
         "Floor": "L1", "Zone": "ZoneB", "Program": "Office",
         "Area": 300.0, "%": 45.0, "Dominant": "Office",
         "Diversity Index (H)": 1.1, "Vertical Continuity": 1.0,
-        "Status": "✅ OK",
+        "Status": "OK",
     }
     csv_text = rows_to_csv([row])
     assert "L1" in csv_text
