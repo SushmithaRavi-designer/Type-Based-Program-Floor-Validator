@@ -25,7 +25,7 @@ from kpi import (
     check_zone_compatibility,
     vertical_stacking_continuity,
 )
-from csv_exporter import rows_to_csv
+from csv_exporter import rows_to_excel
 from extractor import get_param_value, estimate_area_from_display, get_material_color, get_level_info, extract_numeric_value
 
 
@@ -675,24 +675,15 @@ def automate_function(
     for debug_line in debug_info:
         csv_rows.append({ "Level": "", "Program": debug_line, "Area": "" })
     
-    csv_content = rows_to_csv(csv_rows)
+    csv_content = rows_to_excel(csv_rows)
     
-    # Write CSV to temporary file (speckle-automate expects a file path, not bytes)
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".csv",
-        delete=False,
-        prefix="program_floor_validation_"
-    ) as tmp_file:
-        tmp_file.write(csv_content)
-        tmp_path = tmp_file.name
-    
+    # Excel file is already created, just store it
     try:
-        automate_context.store_file_result(tmp_path)
+        automate_context.store_file_result(csv_content)
     finally:
         # Clean up temporary file
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        if os.path.exists(csv_content):
+            os.unlink(csv_content)
 
     # Show offending objects in the Speckle viewer
     if issues:

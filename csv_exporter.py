@@ -1,12 +1,15 @@
 """
 utils/csv_exporter.py
 ─────────────────────
-Build and export the program validation results to CSV format.
+Build and export the program validation results to Excel format.
 """
 
 import csv
 import io
+import tempfile
 from typing import List, Dict
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill
 
 
 COLUMNS = [
@@ -43,6 +46,69 @@ def rows_to_csv(rows: List[Dict]) -> str:
     writer.writeheader()
     writer.writerows(rows)
     return buf.getvalue()
+
+
+def rows_to_excel(rows: List[Dict], filename: str = None) -> str:
+    """
+    Convert a list of row dicts to a properly formatted Excel (.xlsx) file.
+    
+    Parameters
+    ----------
+    rows : list of dicts with keys matching COLUMNS
+    filename : str, optional. If provided, writes to this file. Otherwise returns temp file path.
+    
+    Returns
+    -------
+    str  Path to the Excel file.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Program Floor Analysis"
+    
+    # Write headers
+    for col_idx, header in enumerate(COLUMNS, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        # Style header
+        cell.font = Font(bold=True, color="FFFFFF", size=11)
+        cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    
+    # Write data rows
+    for row_idx, row_data in enumerate(rows, 2):
+        for col_idx, header in enumerate(COLUMNS, 1):
+            value = row_data.get(header, "")
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            
+            # Center align numeric columns
+            if header in ["Area"]:
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            # Center align Status column
+            if header == "Status":
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+    
+    # Set column widths
+    ws.column_dimensions['A'].width = 15  # Level
+    ws.column_dimensions['B'].width = 20  # Program
+    ws.column_dimensions['C'].width = 15  # Area
+    ws.column_dimensions['D'].width = 35  # Status
+    
+    # Set row height for header
+    ws.row_dimensions[1].height = 25
+    
+    # Save to file
+    if filename is None:
+        # Create a temporary file
+        tmp_file = tempfile.NamedTemporaryFile(
+            suffix=".xlsx",
+            delete=False,
+            prefix="program_floor_validation_"
+        )
+        filename = tmp_file.name
+        tmp_file.close()
+    
+    wb.save(filename)
+    return filename
 
 
 def rows_to_floor_summary_csv(floor_data: dict, stacking: dict, thresholds: dict,
