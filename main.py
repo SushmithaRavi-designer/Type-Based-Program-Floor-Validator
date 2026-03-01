@@ -698,22 +698,13 @@ def automate_function(
     if issues:
         automate_context.set_context_view()
 
-    # ── 11. Mark run success (always) and report issues ──────────────────────
-    # Always mark as success, but include issue details in the message
+    # ── 11. Mark run success (always) ──────────────────────
+    # Show only basic completion info in Speckle, details exported to Excel
     success_msg = (
         f"✅ Program floor analysis complete.\n"
         f"Processed {len(generic_models)} elements across {len(floor_data)} levels and {len(zone_data)} zones.\n"
         f"Total area: {sum(meta.get('area', 0) for meta in element_metadata.values()):.2f} m²."
     )
-    
-    if issues:
-        success_msg += f"\n\n⚠️ Found {len(issues)} observation(s):\n"
-        for issue in issues[:5]:  # Show first 5 issues
-            success_msg += f"  • {issue}\n"
-        if len(issues) > 5:
-            success_msg += f"  ... and {len(issues) - 5} more (see version comment)\n"
-    else:
-        success_msg += "\n✓ All levels pass program allocation thresholds."
     
     automate_context.mark_run_success(success_msg)
 

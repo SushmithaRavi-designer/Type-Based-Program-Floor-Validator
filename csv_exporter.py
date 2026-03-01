@@ -13,6 +13,7 @@ COLUMNS = [
     "Level",
     "Program",
     "Area",
+    "Status",
 ]
 
 
