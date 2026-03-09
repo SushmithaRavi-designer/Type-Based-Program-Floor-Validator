@@ -851,23 +851,46 @@ def automate_function(
 
     # Validation report is exported as CSV file via store_file_result()
 
-    # ── 10. Add aggregation summary to Excel ──────────────────────────────────
+    # ── 10. Add aggregation summary to each occupancy sheet
     
-    # Calculate summary statistics
+    # Calculate overall statistics across all occupancies
     total_area = sum(meta.get('area', 0) for meta in element_metadata.values())
-    ok_count = sum(1 for row in csv_rows if row.get("Status") == "OK")
-    mono_count = sum(1 for row in csv_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
-    unique_levels = len(set(row.get("Level", "") for row in csv_rows if row.get("Level")))
-    unique_programs = len(set(row.get("Program", "") for row in csv_rows if row.get("Program")))
+    all_rows = [row for rows in csv_rows_by_occupancy.values() for row in rows]
+    ok_count = sum(1 for row in all_rows if row.get("Status") == "OK")
+    mono_count = sum(1 for row in all_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
+    unique_levels = len(set(row.get("Level", "") for row in all_rows if row.get("Level") and row.get("Level") != "SUMMARY"))
+    unique_programs = len(set(row.get("Program", "") for row in all_rows if row.get("Program") and row.get("Program") != "AGGREGATION SUMMARY"))
     
-    # Add summary separator and data
-    csv_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
-    csv_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
-    csv_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(total_area, 2), "Status": ""})
-    csv_rows.append({"Level": "Total Levels", "Program": "", "Area": unique_levels, "Status": ""})
-    csv_rows.append({"Level": "Total Programs", "Program": "", "Area": unique_programs, "Status": ""})
-    csv_rows.append({"Level": "OK Entries", "Program": "", "Area": ok_count, "Status": ""})
-    csv_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": mono_count, "Status": ""})
+    # Add summary and timing info to each occupancy's sheet
+    for occupancy in csv_rows_by_occupancy.keys():
+        occupancy_rows = csv_rows_by_occupancy[occupancy]
+        
+        # Add summary separator and data
+        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
+        occupancy_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
+        
+        # Calculate occupancy-specific stats
+        occupancy_area = sum(meta.get('area', 0) for meta in element_metadata.values() if meta.get('occupancy') == occupancy)
+        occupancy_ok = sum(1 for row in occupancy_rows if row.get("Status") == "OK")
+        occupancy_mono = sum(1 for row in occupancy_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
+        
+        occupancy_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(occupancy_area, 2), "Status": ""})
+        occupancy_rows.append({"Level": "OK Entries", "Program": "", "Area": occupancy_ok, "Status": ""})
+        occupancy_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": occupancy_mono, "Status": ""})
+        
+        # Add timing breakdown for this occupancy
+        timing_areas = get_area_by_timing(occupancy)
+        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
+        occupancy_rows.append({"Level": "TIMING AREAS", "Program": occupancy, "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
+        occupancy_rows.append({
+            "Level": occupancy,
+            "Program": "REFERENCE VALUES",
+            "Area": round(occupancy_area, 2),
+            "Area_OffPeak": timing_areas["off_peak"],
+            "Area_Morning": timing_areas["morning"],
+            "Area_Afternoon": timing_areas["afternoon"],
+            "Area_Evening": timing_areas["evening"],
+        })
 
     # ── 10.5. Add Program Block aggregation (total area per program by occupancy with timing breakdown) ───────────────────────────────────────────
     # Calculate total area for each program AND occupancy combination, plus timing-based areas
@@ -879,30 +902,7 @@ def automate_function(
         area = meta.get("area", 0)
         program_occupancy_areas[program][occupancy] += area
     
-    # Add program block section to CSV with timing-based columns
-    csv_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
-    csv_rows.append({"Level": "OCCUPANCY TIMING BREAKDOWN", "Program": "OCCUPANCY GROUP", "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
-    
-    for occupancy in sorted(set(meta.get("occupancy", "Unknown") for meta in element_metadata.values())):
-        # Get timing-based areas for this occupancy
-        timing_areas = get_area_by_timing(occupancy)
-        
-        # Calculate total area for this occupancy across all programs
-        total_occupancy_area = sum(
-            meta.get("area", 0) 
-            for meta in element_metadata.values() 
-            if meta.get("occupancy", "Unknown") == occupancy
-        )
-        
-        csv_rows.append({
-            "Level": occupancy,
-            "Program": "AREAS BY TIMING",
-            "Area": round(total_occupancy_area, 2),
-            "Area_OffPeak": timing_areas["off_peak"],
-            "Area_Morning": timing_areas["morning"],
-            "Area_Afternoon": timing_areas["afternoon"],
-            "Area_Evening": timing_areas["evening"],
-        })
+    # Occupancy timing breakdown is now added to each occupancy's sheet above
 
     # ── 11. Export file result based on selected output format ──────────────────────────────────────────
     # Use pre-built occupancy-separated rows
