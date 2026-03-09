@@ -15,6 +15,10 @@ COLUMNS = [
     "Program",
     "Area",
     "Status",
+    "Area_OffPeak",
+    "Area_Morning",
+    "Area_Afternoon",
+    "Area_Evening",
 ]
 
 
@@ -22,21 +26,29 @@ def rows_to_csv(rows: List[Dict]) -> str:
     """
     Convert a list of row dicts to a UTF-8 CSV string.
     Uses QUOTE_MINIMAL to ensure proper escaping and Excel compatibility.
+    Automatically detects all columns from the data.
 
     Parameters
     ----------
-    rows : list of dicts with keys matching COLUMNS
+    rows : list of dicts - keys become column headers
 
     Returns
     -------
     str  Complete CSV text (header + data rows).
     """
+    if not rows:
+        return ""
+    
     buf = io.StringIO()
+    
+    # Detect columns from first row, preserving order
+    fieldnames = list(rows[0].keys()) if rows else COLUMNS
+    
     # QUOTE_MINIMAL: quotes only when needed for special characters
     # dialect='excel': standard Windows/Mac/Linux Excel format
     writer = csv.DictWriter(
         buf, 
-        fieldnames=COLUMNS, 
+        fieldnames=fieldnames, 
         extrasaction="ignore",
         quoting=csv.QUOTE_MINIMAL,
         lineterminator='\r\n'  # Windows-style line endings for Excel
@@ -46,14 +58,127 @@ def rows_to_csv(rows: List[Dict]) -> str:
     return buf.getvalue()
 
 
+def rows_to_excel_multi_sheet(sheets_dict: dict, filename: str = None) -> str:
+    """
+    Convert multiple sheet dicts to a properly formatted Excel (.xlsx) file with multiple sheets.
+    One sheet per occupancy group.
+    
+    Parameters
+    ----------
+    sheets_dict : dict with format {sheet_name: [rows_list]}
+    filename : str, optional. If provided, writes to this file. Otherwise returns temp file path.
+    
+    Returns
+    -------
+    str  Path to the Excel file.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        
+        wb = Workbook()
+        # Remove default sheet
+        if wb.sheetnames:
+            wb.remove(wb.active)
+        
+        for sheet_name, rows in sheets_dict.items():
+            ws = wb.create_sheet(title=sheet_name)
+            
+            # Detect columns from first row, preserving order
+            fieldnames = list(rows[0].keys()) if rows else COLUMNS
+            
+            # Write headers
+            for col_idx, header in enumerate(fieldnames, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                # Style header
+                cell.font = Font(bold=True, color="FFFFFF", size=11)
+                cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
+            # Write data rows
+            for row_idx, row_data in enumerate(rows, 2):
+                for col_idx, header in enumerate(fieldnames, 1):
+                    value = row_data.get(header, "")
+                    cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                    cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                    
+                    # Right align numeric columns
+                    if "Area" in header or "Area_" in header:
+                        try:
+                            float(value)
+                            cell.alignment = Alignment(horizontal="right", vertical="center")
+                        except (ValueError, TypeError):
+                            pass
+                    # Center align Status column
+                    if header == "Status":
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+            
+            # Set column widths dynamically
+            for col_idx, header in enumerate(fieldnames, 1):
+                if "Area" in header:
+                    ws.column_dimensions[chr(64 + col_idx)].width = 18
+                elif "Status" in header:
+                    ws.column_dimensions[chr(64 + col_idx)].width = 35
+                else:
+                    ws.column_dimensions[chr(64 + col_idx)].width = 20
+            
+            # Set row height for header
+            ws.row_dimensions[1].height = 25
+        
+        # Save to file
+        if filename is None:
+            # Create a temporary file
+            tmp_file = tempfile.NamedTemporaryFile(
+                suffix=".xlsx",
+                delete=False,
+                prefix="program_floor_validation_"
+            )
+            filename = tmp_file.name
+            tmp_file.close()
+        
+        wb.save(filename)
+        return filename
+    
+    except ImportError:
+        # If openpyxl not available, create first sheet as CSV
+        if sheets_dict:
+            first_sheet_name = list(sheets_dict.keys())[0]
+            rows = sheets_dict[first_sheet_name]
+            buf = io.StringIO()
+            fieldnames = list(rows[0].keys()) if rows else COLUMNS
+            writer = csv.DictWriter(
+                buf, 
+                fieldnames=fieldnames, 
+                extrasaction="ignore",
+                quoting=csv.QUOTE_MINIMAL,
+                lineterminator='\r\n'
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+            
+            if filename is None:
+                tmp_file = tempfile.NamedTemporaryFile(
+                    suffix=".csv",
+                    delete=False,
+                    prefix="program_floor_validation_"
+                )
+                filename = tmp_file.name
+                tmp_file.close()
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(buf.getvalue())
+            return filename
+
+
 def rows_to_excel(rows: List[Dict], filename: str = None) -> str:
     """
     Convert a list of row dicts to a properly formatted Excel (.xlsx) file.
     Falls back to CSV if openpyxl is not available.
+    Automatically detects columns from the data.
     
     Parameters
     ----------
-    rows : list of dicts with keys matching COLUMNS
+    rows : list of dicts - keys become column headers
     filename : str, optional. If provided, writes to this file. Otherwise returns temp file path.
     
     Returns
@@ -68,8 +193,11 @@ def rows_to_excel(rows: List[Dict], filename: str = None) -> str:
         ws = wb.active
         ws.title = "Program Floor Analysis"
         
+        # Detect columns from first row, preserving order
+        fieldnames = list(rows[0].keys()) if rows else COLUMNS
+        
         # Write headers
-        for col_idx, header in enumerate(COLUMNS, 1):
+        for col_idx, header in enumerate(fieldnames, 1):
             cell = ws.cell(row=1, column=col_idx, value=header)
             # Style header
             cell.font = Font(bold=True, color="FFFFFF", size=11)
@@ -78,23 +206,30 @@ def rows_to_excel(rows: List[Dict], filename: str = None) -> str:
         
         # Write data rows
         for row_idx, row_data in enumerate(rows, 2):
-            for col_idx, header in enumerate(COLUMNS, 1):
+            for col_idx, header in enumerate(fieldnames, 1):
                 value = row_data.get(header, "")
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
                 
-                # Center align numeric columns
-                if header in ["Area"]:
-                    cell.alignment = Alignment(horizontal="right", vertical="center")
+                # Right align numeric columns
+                if "Area" in header or "Area_" in header:
+                    try:
+                        float(value)
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    except (ValueError, TypeError):
+                        pass
                 # Center align Status column
                 if header == "Status":
                     cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Set column widths
-        ws.column_dimensions['A'].width = 15  # Level
-        ws.column_dimensions['B'].width = 20  # Program
-        ws.column_dimensions['C'].width = 15  # Area
-        ws.column_dimensions['D'].width = 35  # Status
+        # Set column widths dynamically
+        for col_idx, header in enumerate(fieldnames, 1):
+            if "Area" in header:
+                ws.column_dimensions[chr(64 + col_idx)].width = 18
+            elif "Status" in header:
+                ws.column_dimensions[chr(64 + col_idx)].width = 35
+            else:
+                ws.column_dimensions[chr(64 + col_idx)].width = 20
         
         # Set row height for header
         ws.row_dimensions[1].height = 25
@@ -116,9 +251,13 @@ def rows_to_excel(rows: List[Dict], filename: str = None) -> str:
     except ImportError:
         # Fallback to CSV if openpyxl is not available
         buf = io.StringIO()
+        
+        # Detect columns from first row
+        fieldnames = list(rows[0].keys()) if rows else COLUMNS
+        
         writer = csv.DictWriter(
             buf, 
-            fieldnames=COLUMNS, 
+            fieldnames=fieldnames, 
             extrasaction="ignore",
             quoting=csv.QUOTE_MINIMAL,
             lineterminator='\r\n'

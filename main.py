@@ -25,7 +25,7 @@ from kpi import (
     check_zone_compatibility,
     vertical_stacking_continuity,
 )
-from csv_exporter import rows_to_excel
+from csv_exporter import rows_to_excel, rows_to_csv, rows_to_excel_multi_sheet
 from extractor import get_param_value, estimate_area_from_display, get_material_color, get_level_info, extract_numeric_value
 
 
@@ -451,6 +451,7 @@ def automate_function(
     # ── 4. Extract program / zone / floor / area per element ──────────────────
     floor_data: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     zone_data:  dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    floor_data_by_occupancy: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))  # {occupancy: {level: {program: area}}}
     material_colors: dict[str, str] = {}  # Track material colors by element
     element_metadata: dict = {}  # Store complete element metadata with level and color
 
@@ -533,6 +534,32 @@ def automate_function(
                                     area = round(float(area_numeric), 2)
                                 except (ValueError, TypeError):
                                     area = 0.0
+        
+        # Fallback: Try to extract Area from get_param_value if not found above
+        if area == 0.0:
+            area_fallback = get_param_value(obj, "Area")
+            if area_fallback:
+                area_numeric = extract_numeric_value(str(area_fallback))
+                if area_numeric and area_numeric > 0:
+                    try:
+                        area = round(float(area_numeric), 2)
+                        area_raw = area_fallback
+                    except (ValueError, TypeError):
+                        area = 0.0
+        
+        # Second fallback: Try alternative parameter names
+        if area == 0.0:
+            for alt_area_name in ["Instance Area", "Computed Area", "Area m2", "AreaM2"]:
+                area_fallback = get_param_value(obj, alt_area_name)
+                if area_fallback:
+                    area_numeric = extract_numeric_value(str(area_fallback))
+                    if area_numeric and area_numeric > 0:
+                        try:
+                            area = round(float(area_numeric), 2)
+                            area_raw = area_fallback
+                            break
+                        except (ValueError, TypeError):
+                            pass
 
         # Calculate timing-based areas for this occupancy
         timing_areas = get_area_by_timing(occupancy)
@@ -560,10 +587,11 @@ def automate_function(
                 material_colors[program] = material_color
 
         floor_data[level][program] += area
+        floor_data_by_occupancy[occupancy][level][program] += area
         zone_data[zone][program]   += area
 
-    # ── 5. Compute KPIs, build CSV rows, collect issues ───────────────────────
-    csv_rows          = []
+    # ── 5. Compute KPIs, build CSV rows per occupancy, collect issues ───────────────────────
+    csv_rows_by_occupancy: dict[str, list] = defaultdict(list)  # {occupancy: [rows]}
     issues            = []
     mono_floor_objects = []   # objects on mono-functional floors (for error pin)
     zone_issue_objects = []   # objects in mismatched zones (for error pin)
@@ -593,30 +621,34 @@ def automate_function(
     for area_val, count in sorted(area_values.items()):
         debug_info.append(f"  Area={area_val}: {count} objects")
 
-    for level, prog_areas in sorted(floor_data.items()):
-        total         = sum(prog_areas.values())
-        diversity     = shannon_diversity(prog_areas)
-        is_mono, dominant, dom_pct, allowed = mono_functional_check(
-            prog_areas, thresholds, function_inputs.default_threshold
-        )
-
-        if is_mono:
-            level_status = f"MONO-FUNCTIONAL ({dom_pct:.1f}% > {allowed}%)"
-            issues.append(
-                f"Level {level} exceeds mono-functional threshold "
-                f"({dominant} = {dom_pct:.1f}%, limit = {allowed}%)."
+    # Build CSV rows separately for each occupancy
+    for occupancy in sorted(floor_data_by_occupancy.keys()):
+        occupancy_floor_data = floor_data_by_occupancy[occupancy]
+        
+        for level, prog_areas in sorted(occupancy_floor_data.items()):
+            total         = sum(prog_areas.values())
+            diversity     = shannon_diversity(prog_areas)
+            is_mono, dominant, dom_pct, allowed = mono_functional_check(
+                prog_areas, thresholds, function_inputs.default_threshold
             )
-        else:
-            level_status = "OK"
 
-        for program, area in sorted(prog_areas.items()):
-            
-            csv_rows.append({
-                "Level":    level,
-                "Program":  program,
-                "Area":     round(area, 2),
-                "Status":   level_status,
-            })
+            if is_mono:
+                level_status = f"MONO-FUNCTIONAL ({dom_pct:.1f}% > {allowed}%)"
+                issues.append(
+                    f"Level {level} exceeds mono-functional threshold "
+                    f"({dominant} = {dom_pct:.1f}%, limit = {allowed}%)."
+                )
+            else:
+                level_status = "OK"
+
+            for program, area in sorted(prog_areas.items()):
+                
+                csv_rows_by_occupancy[occupancy].append({
+                    "Level":    level,
+                    "Program":  program,
+                    "Area":     round(area, 2),
+                    "Status":   level_status,
+                })
 
     # ── 6. Zone compatibility check ───────────────────────────────────────────
     zone_issues = check_zone_compatibility(
@@ -710,81 +742,132 @@ def automate_function(
 
     # Validation report is exported as CSV file via store_file_result()
 
-    # ── 10. Add aggregation summary to Excel ──────────────────────────────────
+    # ── 10. Add aggregation summary to each occupancy sheet
     
-    # Calculate summary statistics
+    # Calculate overall statistics
     total_area = sum(meta.get('area', 0) for meta in element_metadata.values())
-    ok_count = sum(1 for row in csv_rows if row.get("Status") == "OK")
-    mono_count = sum(1 for row in csv_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
-    unique_levels = len(set(row.get("Level", "") for row in csv_rows if row.get("Level")))
-    unique_programs = len(set(row.get("Program", "") for row in csv_rows if row.get("Program")))
+    all_ok_count = sum(1 for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if row.get("Status") == "OK")
+    all_mono_count = sum(1 for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
+    all_unique_levels = len(set(row.get("Level", "") for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if row.get("Level")))
+    all_unique_programs = len(set(row.get("Program", "") for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if row.get("Program")))
     
-    # Add summary separator and data
-    csv_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
-    csv_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
-    csv_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(total_area, 2), "Status": ""})
-    csv_rows.append({"Level": "Total Levels", "Program": "", "Area": unique_levels, "Status": ""})
-    csv_rows.append({"Level": "Total Programs", "Program": "", "Area": unique_programs, "Status": ""})
-    csv_rows.append({"Level": "OK Entries", "Program": "", "Area": ok_count, "Status": ""})
-    csv_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": mono_count, "Status": ""})
-
-    # ── 10.5. Add Program Block aggregation (total area per program by occupancy with timing breakdown) ───────────────────────────────────────────
-    # Calculate total area for each program AND occupancy combination, plus timing-based areas
-    program_occupancy_areas = defaultdict(lambda: defaultdict(float))  # {program: {occupancy: area}}
-    
-    for meta in element_metadata.values():
-        program = meta.get("program", "Unknown")
-        occupancy = meta.get("occupancy", "Unknown")
-        area = meta.get("area", 0)
-        program_occupancy_areas[program][occupancy] += area
-    
-    # Add program block section to CSV with timing-based columns
-    csv_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
-    csv_rows.append({"Level": "OCCUPANCY TIMING BREAKDOWN", "Program": "OCCUPANCY GROUP", "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
-    
-    for occupancy in sorted(set(meta.get("occupancy", "Unknown") for meta in element_metadata.values())):
-        # Get timing-based areas for this occupancy
+    # Add summary and timing info to each occupancy's sheet
+    for occupancy in csv_rows_by_occupancy.keys():
+        occupancy_rows = csv_rows_by_occupancy[occupancy]
+        
+        # Add summary separator and data
+        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
+        occupancy_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
+        
+        # Calculate occupancy-specific stats
+        occupancy_area = sum(meta.get('area', 0) for meta in element_metadata.values() if meta.get('occupancy') == occupancy)
+        occupancy_ok = sum(1 for row in occupancy_rows if row.get("Status") == "OK")
+        occupancy_mono = sum(1 for row in occupancy_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
+        
+        occupancy_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(occupancy_area, 2), "Status": ""})
+        occupancy_rows.append({"Level": "OK Entries", "Program": "", "Area": occupancy_ok, "Status": ""})
+        occupancy_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": occupancy_mono, "Status": ""})
+        
+        # Add timing breakdown for this occupancy
         timing_areas = get_area_by_timing(occupancy)
-        
-        # Calculate total area for this occupancy across all programs
-        total_occupancy_area = sum(
-            meta.get("area", 0) 
-            for meta in element_metadata.values() 
-            if meta.get("occupancy", "Unknown") == occupancy
-        )
-        
-        csv_rows.append({
+        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
+        occupancy_rows.append({"Level": "TIMING AREAS", "Program": occupancy, "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
+        occupancy_rows.append({
             "Level": occupancy,
-            "Program": "AREAS BY TIMING",
-            "Area": round(total_occupancy_area, 2),
+            "Program": "REFERENCE VALUES",
+            "Area": round(occupancy_area, 2),
             "Area_OffPeak": timing_areas["off_peak"],
             "Area_Morning": timing_areas["morning"],
             "Area_Afternoon": timing_areas["afternoon"],
             "Area_Evening": timing_areas["evening"],
         })
 
-    # ── 11. Export Excel file result ──────────────────────────────────────────
+    # ── 11. Export file result based on selected output format ──────────────────────────────────────────
+    # Use pre-built occupancy-separated rows
+    unique_occupancies = sorted(csv_rows_by_occupancy.keys())
     
-    csv_content = rows_to_excel(csv_rows)
+    if function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
+        # Export as separate CSV files for each occupancy group
+        export_format = "CSV (for Google Sheets)"
+        csv_files = []
+        
+        for occupancy in unique_occupancies:
+            occupancy_rows = csv_rows_by_occupancy[occupancy]
+            
+            # If no rows for this occupancy, create header rows at least
+            if not occupancy_rows:
+                occupancy_rows = [
+                    {"Level": occupancy, "Program": "No data", "Area": 0, "Status": ""}
+                ]
+            
+            # Create CSV content
+            csv_content_str = rows_to_csv(occupancy_rows)
+            
+            # Write CSV to temporary file with occupancy name
+            tmp_file = tempfile.NamedTemporaryFile(
+                suffix=f"_{occupancy}.csv",
+                delete=False,
+                prefix="program_floor_validation_",
+                mode='w',
+                encoding='utf-8'
+            )
+            tmp_file.write(csv_content_str)
+            tmp_file.close()
+            csv_files.append(tmp_file.name)
+            
+            # Store each occupancy CSV as a separate result
+            try:
+                automate_context.store_file_result(tmp_file.name)
+            except Exception:
+                pass
+        
+        # Clean up all temporary files
+        for csv_file in csv_files:
+            try:
+                if os.path.exists(csv_file):
+                    os.unlink(csv_file)
+            except Exception:
+                pass
     
-    # Excel file is already created, just store it
-    try:
-        automate_context.store_file_result(csv_content)
-    finally:
-        # Clean up temporary file
-        if os.path.exists(csv_content):
-            os.unlink(csv_content)
+    else:
+        # Export as Excel with multiple sheets (one per occupancy)
+        export_format = "Excel"
+        excel_sheets = {}
+        
+        for occupancy in unique_occupancies:
+            occupancy_rows = csv_rows_by_occupancy[occupancy]
+            
+            # If no rows for this occupancy, create header rows at least
+            if not occupancy_rows:
+                occupancy_rows = [
+                    {"Level": occupancy, "Program": "No data", "Area": 0, "Status": ""}
+                ]
+            
+            excel_sheets[occupancy] = occupancy_rows
+        
+        # Create multiple sheet Excel file
+        csv_content = rows_to_excel_multi_sheet(excel_sheets)
+        
+        # Store the file result
+        try:
+            automate_context.store_file_result(csv_content)
+        finally:
+            # Clean up temporary file
+            if os.path.exists(csv_content):
+                os.unlink(csv_content)
 
     # Show offending objects in the Speckle viewer
     if issues:
         automate_context.set_context_view()
 
     # ── 12. Mark run success (always) ──────────────────────
-    # Show only basic completion info in Speckle, details exported to Excel
+    # Show only basic completion info in Speckle, details exported
+    total_area_val = sum(meta.get('area', 0) for meta in element_metadata.values())
+    occupancy_count = len(unique_occupancies)
     success_msg = (
-        f"Program floor analysis complete.\n"
+        f"Program floor analysis complete ({export_format} format with {occupancy_count} occupancy groups).\n"
         f"Processed {len(generic_models)} elements across {len(floor_data)} levels and {len(zone_data)} zones.\n"
-        f"Total area: {sum(meta.get('area', 0) for meta in element_metadata.values()):.2f} m2."
+        f"Total area: {total_area_val:.2f} m². Exported {occupancy_count} sheet(s)/file(s) for occupancy groups: {', '.join(unique_occupancies)}"
     )
     
     automate_context.mark_run_success(success_msg)
