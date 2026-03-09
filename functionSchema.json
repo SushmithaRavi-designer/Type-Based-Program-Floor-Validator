@@ -9,6 +9,15 @@
       "title": "ColorExtractionMode",
       "type": "string"
     },
+    "OutputFormat": {
+      "description": "Export output format selection.",
+      "enum": [
+        "excel",
+        "google_sheets"
+      ],
+      "title": "OutputFormat",
+      "type": "string"
+    },
     "ReportLevel": {
       "description": "Reporting detail level.",
       "enum": [
@@ -32,35 +41,11 @@
   },
   "description": "These are function author-defined values.\n\nAutomate will make sure to supply them matching the types specified here.\nPlease use the pydantic model schema to define your inputs:\nhttps://docs.pydantic.dev/latest/usage/models/",
   "properties": {
-    "programSourceParameter": {
-      "default": "Type Name",
-      "description": "Name of parameter containing program information (e.g., Type Name, Category)",
-      "title": "Program Source Parameter",
-      "type": "string"
-    },
-    "zoneParameterName": {
-      "default": "Zone",
-      "description": "Parameter storing zone information",
-      "title": "Zone Parameter Name",
-      "type": "string"
-    },
-    "levelParameterName": {
-      "default": "Level",
-      "description": "Parameter that defines building level",
-      "title": "Level Parameter Name",
-      "type": "string"
-    },
-    "areaParameterName": {
-      "default": "Area",
-      "description": "Parameter containing element area",
-      "title": "Area Parameter Name",
-      "type": "string"
-    },
-    "materialColorParameterName": {
-      "default": "Material",
-      "description": "Parameter containing material or color information",
-      "title": "Material Color Parameter Name",
-      "type": "string"
+    "outputFormat": {
+      "$ref": "#/$defs/OutputFormat",
+      "default": "excel",
+      "description": "Select the output format for the analysis results",
+      "title": "Output Format"
     },
     "colorExtractionMode": {
       "$ref": "#/$defs/ColorExtractionMode",
@@ -73,12 +58,6 @@
       "default": "custom",
       "description": "STRICT: Apply thresholds strictly | PERMISSIVE: Allow higher tolerance | CUSTOM: Use defined threshold matrix",
       "title": "Threshold Mode"
-    },
-    "programThresholdMatrix": {
-      "default": "{\"Retail\": 60, \"Office\": 75, \"Housing\": 80, \"Exhibition\": 65}",
-      "description": "JSON dictionary mapping program type to its maximum allowed percentage. Example: {\"Retail\": 60, \"Office\": 75, \"Housing\": 80} | Only used when threshold_mode is CUSTOM",
-      "title": "Program Threshold Matrix (JSON)",
-      "type": "string"
     },
     "defaultThreshold": {
       "default": 70.0,

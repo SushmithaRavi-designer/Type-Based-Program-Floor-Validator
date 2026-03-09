@@ -127,36 +127,11 @@ def _find_processable_objects(all_objects):
 # compatibility helper --------------------------------------------------
 
 def _parse_thresholds(func_inputs) -> dict:
-    """Return a dict parsed from any object that carries the
-    ``program_threshold_matrix`` value.
-
-    The current automation signature provides a ``FunctionInputs`` instance
-    but older Speckle runners sometimes shipped an object named ``function``
-    containing ``inputs``.  When the legacy code referenced
-    ``function.inputs.program_threshold_matrix`` the variable ``function`` was
-    undefined, resulting in a ``NameError`` (see user report).  This helper
-    insulates the parsing logic by greedily looking in both locations and
-    falling back to an empty dictionary when parsing fails.
+    """Return the default threshold matrix.
+    
+    A hardcoded default threshold matrix is used for all program types.
     """
-    matrix = None
-
-    # most common case: the convenient wrapper object with direct attributes
-    if hasattr(func_inputs, "program_threshold_matrix"):
-        matrix = func_inputs.program_threshold_matrix
-    # legacy wrapper where inputs are nested
-    elif hasattr(func_inputs, "inputs") and hasattr(func_inputs.inputs, "program_threshold_matrix"):
-        matrix = func_inputs.inputs.program_threshold_matrix
-    # finally try dict-like access if the caller passed a plain dict
-    elif isinstance(func_inputs, dict):
-        matrix = func_inputs.get("program_threshold_matrix")
-
-    if not matrix:
-        return {}
-
-    try:
-        return json.loads(matrix)
-    except json.JSONDecodeError:
-        return {}
+    return {"Retail": 60, "Office": 75, "Housing": 80, "Exhibition": 65}
 
 
 
@@ -168,6 +143,12 @@ class ColorExtractionMode(str, Enum):
     """Material color extraction control."""
     ENABLED = "enabled"
     DISABLED = "disabled"
+
+
+class OutputFormat(str, Enum):
+    """Export output format selection."""
+    EXCEL = "excel"
+    GOOGLE_SHEETS = "google_sheets"
 
 
 class ReportLevel(str, Enum):
@@ -185,6 +166,90 @@ class ThresholdMode(str, Enum):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Timing-based Area Calculation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_area_by_timing(occupancy: str, timing_seconds: float = None) -> dict:
+    """Calculate area values for each time period based on occupancy.
+    
+    Time periods (in seconds):
+    - Off-peak: Timing > 75600s OR Timing < 32400s
+    - Morning (AM): 32400s ≤ Timing < 43200s
+    - Afternoon (PM): 43200s ≤ Timing < 61200s
+    - Evening (EV): 61200s ≤ Timing < 75600s
+    
+    Returns dict with area values for: off_peak, morning, afternoon, evening (in mm, converted to m²)
+    1 m² = 1,000,000 mm²
+    """
+    
+    # Define area values (in mm) for each occupancy type and time period
+    occupancy_areas = {
+        "Medical": {
+            "off_peak": 700,
+            "morning": 56000,
+            "afternoon": 70000,
+            "evening": 42000
+        },
+        "Hotel": {
+            "off_peak": 700,
+            "morning": 28000,
+            "afternoon": 35000,
+            "evening": 63000
+        },
+        "Transit": {
+            "off_peak": 700,
+            "morning": 63000,
+            "afternoon": 70000,
+            "evening": 49000
+        },
+        "Entertainment": {
+            "off_peak": 700,
+            "morning": 14000,
+            "afternoon": 28000,
+            "evening": 70000
+        },
+        "Corporate": {
+            "off_peak": 700,
+            "morning": 59500,
+            "afternoon": 70000,
+            "evening": 21000
+        },
+        "WorkAdmin": {
+            "off_peak": 700,
+            "morning": 56000,
+            "afternoon": 66500,
+            "evening": 14000
+        },
+        "SkyZone": {
+            "off_peak": 700,
+            "morning": 28000,
+            "afternoon": 49000,
+            "evening": 70000
+        },
+        "Voids": {
+            "off_peak": 14000,
+            "morning": 14000,
+            "afternoon": 14000,
+            "evening": 14000
+        }
+    }
+    
+    # Get the area values for this occupancy, default to Voids if not found
+    if occupancy not in occupancy_areas:
+        occupancy = "Voids"
+    
+    areas_mm = occupancy_areas[occupancy]
+    
+    # Convert from mm to m² (1 m² = 1,000,000 mm²)
+    return {
+        "off_peak": round(areas_mm["off_peak"] / 1_000_000, 4),
+        "morning": round(areas_mm["morning"] / 1_000_000, 4),
+        "afternoon": round(areas_mm["afternoon"] / 1_000_000, 4),
+        "evening": round(areas_mm["evening"] / 1_000_000, 4),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Input Schema
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -196,35 +261,11 @@ class FunctionInputs(AutomateBase):
     https://docs.pydantic.dev/latest/usage/models/
     """
 
-    # ── Parameter Configuration ──
-    program_source_parameter: str = Field(
-        default="Type Name",
-        title="Program Source Parameter",
-        description="Name of parameter containing program information (e.g., Type Name, Category)",
-    )
-    
-    zone_parameter_name: str = Field(
-        default="Zone",
-        title="Zone Parameter Name",
-        description="Parameter storing zone information",
-    )
-    
-    level_parameter_name: str = Field(
-        default="Level",
-        title="Level Parameter Name",
-        description="Parameter that defines building level",
-    )
-    
-    area_parameter_name: str = Field(
-        default="Area",
-        title="Area Parameter Name",
-        description="Parameter containing element area",
-    )
-    
-    material_color_parameter_name: str = Field(
-        default="Material",
-        title="Material Color Parameter Name",
-        description="Parameter containing material or color information",
+    # ── Output Configuration ──
+    output_format: OutputFormat = Field(
+        default=OutputFormat.EXCEL,
+        title="Output Format",
+        description="Select the output format for the analysis results",
     )
 
     # ── Color Extraction Control ──
@@ -242,16 +283,6 @@ class FunctionInputs(AutomateBase):
             "STRICT: Apply thresholds strictly | "
             "PERMISSIVE: Allow higher tolerance | "
             "CUSTOM: Use defined threshold matrix"
-        ),
-    )
-    
-    program_threshold_matrix: str = Field(
-        default='{"Retail": 60, "Office": 75, "Housing": 80, "Exhibition": 65}',
-        title="Program Threshold Matrix (JSON)",
-        description=(
-            "JSON dictionary mapping program type to its maximum allowed percentage. "
-            'Example: {"Retail": 60, "Office": 75, "Housing": 80} | '
-            "Only used when threshold_mode is CUSTOM"
         ),
     )
     
@@ -357,17 +388,17 @@ def automate_function(
                     tp = props_params.get("Type Parameters", {})
                     if isinstance(tp, dict):
                         debug_info.append(f"  Type Parameters keys: {list(tp.keys())}")
-                        if "Dimensions" in tp:
-                            dims = tp.get("Dimensions", {})
-                            if isinstance(dims, dict):
-                                debug_info.append(f"    Dimensions keys: {list(dims.keys())}")
-                                dia_val = dims.get("DIA-2")
-                                debug_info.append(f"    DIA-2 value: {dia_val}")
+                        if "Instance Parameters" in tp:
+                            inst_params = tp.get("Instance Parameters", {})
+                            if isinstance(inst_params, dict):
+                                debug_info.append(f"    Instance Parameters keys: {list(inst_params.keys())}")
+                                area_val = inst_params.get("Area")
+                                debug_info.append(f"    Area value: {area_val}")
             
-            # Try to find DIA-2 in any nested location
+            # Try to find Area in any nested location
             for key in properties.keys():
-                if "DIA" in key.upper() or "dimension" in key.lower():
-                    debug_info.append(f"  Found key with DIA/dimension: '{key}'")
+                if "area" in key.lower():
+                    debug_info.append(f"  Found key with area: '{key}'")
         elif properties is not None:
             debug_info.append(f"properties exists: True (object, not dict)")
             try:
@@ -378,22 +409,21 @@ def automate_function(
         else:
             debug_info.append(f"properties exists: False")
         
-        # Try extraction
-        dia2_val = get_param_value(first_obj, "DIA-2")
-        debug_info.append(f"DIA-2 from get_param_value: '{dia2_val}'")
+        # Try extraction of Area parameter
+        area_param_val = get_param_value(first_obj, "Area")
+        debug_info.append(f"Area from get_param_value: '{area_param_val}'")
         
-        if dia2_val:
-            diameter = extract_numeric_value(dia2_val)
-            debug_info.append(f"DIA-2 extracted numeric: {diameter}")
-            if diameter:
+        if area_param_val:
+            area_extracted = extract_numeric_value(area_param_val)
+            debug_info.append(f"Area extracted numeric: {area_extracted}")
+            if area_extracted:
                 try:
-                    radius = diameter / 2
-                    calc_area = round(pi * (radius ** 2), 2)
-                    debug_info.append(f"SUCCESS: DIA-2={diameter} -> area={calc_area} m2")
+                    area_final = round(float(area_extracted), 2)
+                    debug_info.append(f"SUCCESS: Area={area_final} m²")
                 except (ValueError, TypeError) as e:
-                    debug_info.append(f"AREA CALCULATION ERROR: {e}")
+                    debug_info.append(f"AREA EXTRACTION ERROR: {e}")
         else:
-            debug_info.append("NOTICE: DIA-2 not found - Area will be 0")
+            debug_info.append("NOTICE: Area parameter not found - Area will be 0")
         
         debug_output = "\n".join(debug_info)
 
@@ -426,7 +456,7 @@ def automate_function(
 
     for obj in generic_models:
         # Program/Zone/Floor extracted from Type Name (e.g., "MEDICAL_ZoneA_LEVEL10")
-        raw_type = get_param_value(obj, function_inputs.program_source_parameter) or ""
+        raw_type = get_param_value(obj, "Type Name") or ""
         
         # If still empty, try common alternative names
         if not raw_type:
@@ -453,7 +483,7 @@ def automate_function(
             zone = "Unknown"
 
         # Floor / Level: Use level parsed from Type Name, fallback to level extraction
-        level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, function_inputs.level_parameter_name)
+        level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, "Level")
         if not level:
             level = "Unknown"
 
@@ -461,14 +491,25 @@ def automate_function(
         material_color = None
         if function_inputs.color_extraction_mode == ColorExtractionMode.ENABLED:
             # First try to get from actual Revit material object
-            material_color = get_material_color(obj, function_inputs.material_color_parameter_name)
+            material_color = get_material_color(obj, "Material")
         if not material_color:
             material_color = "Not Found"
 
-        # Area: Extract ONLY from DIA-2 in Revit's nested Type Parameters → Dimensions
-        # Path: obj.properties["Parameters"]["Type Parameters"]["Dimensions"]["DIA-2"]
+        # Extract occupancy/group name from properties
+        occupancy = "Unknown"
+        properties = getattr(obj, "properties", None)
+        if isinstance(properties, dict):
+            occupancy = properties.get("groupname") or "Unknown"
+        elif properties is not None:
+            occupancy = getattr(properties, "groupname", "Unknown") or "Unknown"
+        
+        if not occupancy or occupancy == "Unknown":
+            occupancy = "Unknown"
+
+        # Area: Extract from Instance Parameters → Area
+        # Path: obj.properties["Parameters"]["Type Parameters"]["Instance Parameters"]["Area"]
         area = 0.0
-        dia_2_raw = None
+        area_raw = None
         
         properties = getattr(obj, "properties", None)
         if isinstance(properties, dict):
@@ -476,25 +517,25 @@ def automate_function(
             if isinstance(params, dict):
                 type_params = params.get("Type Parameters")
                 if isinstance(type_params, dict):
-                    dimensions = type_params.get("Dimensions")
-                    if isinstance(dimensions, dict):
-                        dia_2_raw = dimensions.get("DIA-2")
+                    instance_params = type_params.get("Instance Parameters")
+                    if isinstance(instance_params, dict):
+                        area_raw = instance_params.get("Area")
                         
-                        if dia_2_raw is not None:
-                            # DIA-2 may be a string like "60" or a dict like {"value": 60, "units": "Meters"}
-                            if isinstance(dia_2_raw, dict):
-                                dia_2_numeric = dia_2_raw.get("value")
+                        if area_raw is not None:
+                            # Area may be a string like "60" or a dict like {"value": 60, "units": "m²"}
+                            if isinstance(area_raw, dict):
+                                area_numeric = area_raw.get("value")
                             else:
-                                dia_2_numeric = extract_numeric_value(str(dia_2_raw))
+                                area_numeric = extract_numeric_value(str(area_raw))
                             
-                            if dia_2_numeric and dia_2_numeric > 0:
+                            if area_numeric and area_numeric > 0:
                                 try:
-                                    # Calculate circular area: A = π × (d/2)²
-                                    diameter = float(dia_2_numeric)
-                                    radius = diameter / 2
-                                    area = round(pi * (radius ** 2), 2)
+                                    area = round(float(area_numeric), 2)
                                 except (ValueError, TypeError):
                                     area = 0.0
+
+        # Calculate timing-based areas for this occupancy
+        timing_areas = get_area_by_timing(occupancy)
 
         # Store metadata
         obj_id = getattr(obj, "id", None) or id(obj)
@@ -502,10 +543,15 @@ def automate_function(
             "program": program,
             "zone": zone,
             "level": level,
+            "occupancy": occupancy,
             "material_color": material_color,
             "area": area,
+            "area_off_peak": timing_areas["off_peak"],
+            "area_morning": timing_areas["morning"],
+            "area_afternoon": timing_areas["afternoon"],
+            "area_evening": timing_areas["evening"],
             "speckle_type": getattr(obj, "speckle_type", "Unknown"),
-            "dia_2_raw": dia_2_raw,  # DEBUG: track what DIA-2 was extracted
+            "area_raw": area_raw,  # DEBUG: track what Area was extracted
         }
 
         # Track colors by program for reporting
@@ -524,32 +570,28 @@ def automate_function(
 
     stacking = vertical_stacking_continuity(dict(floor_data))
     
-    # DEBUG: Count objects with actual DIA-2 values and show distribution
-    objs_with_dia2 = sum(1 for meta in element_metadata.values() if meta.get("dia_2_raw") is not None)
+    # DEBUG: Count objects with actual Area values and show distribution
+    objs_with_area_param = sum(1 for meta in element_metadata.values() if meta.get("area_raw") is not None)
     objs_with_area = sum(1 for meta in element_metadata.values() if meta.get("area", 0) > 0)
     total_area_sum = sum(meta.get("area", 0) for meta in element_metadata.values())
     
-    # Count unique DIA-2 values
-    dia2_values = {}
+    # Count unique Area values
+    area_values = {}
     for meta in element_metadata.values():
-        raw = meta.get("dia_2_raw")
+        raw = meta.get("area_raw")
         if raw is not None:
             # Extract numeric value from dict if needed
-            dia_num = raw.get("value") if isinstance(raw, dict) else raw
-            if dia_num not in dia2_values:
-                dia2_values[dia_num] = 0
-            dia2_values[dia_num] += 1
+            area_num = raw.get("value") if isinstance(raw, dict) else raw
+            if area_num not in area_values:
+                area_values[area_num] = 0
+            area_values[area_num] += 1
     
     debug_info.append("")
-    debug_info.append(f"AGGREGATION SUMMARY: {len(generic_models)} objects → {objs_with_dia2} with DIA-2 → {objs_with_area} with calculated area")
+    debug_info.append(f"AGGREGATION SUMMARY: {len(generic_models)} objects → {objs_with_area_param} with Area parameter → {objs_with_area} with valid area")
     debug_info.append(f"Total area across all objects: {total_area_sum:.2f} m²")
-    debug_info.append(f"Unique DIA-2 values found: {len(dia2_values)}")
-    for dia_val, count in sorted(dia2_values.items()):
-        try:
-            test_area = round(pi * ((float(dia_val) / 2) ** 2), 2)
-            debug_info.append(f"  DIA-2={dia_val}: {count} objects → area={test_area} m² each")
-        except:
-            debug_info.append(f"  DIA-2={dia_val}: {count} objects")
+    debug_info.append(f"Unique Area values found: {len(area_values)}")
+    for area_val, count in sorted(area_values.items()):
+        debug_info.append(f"  Area={area_val}: {count} objects")
 
     for level, prog_areas in sorted(floor_data.items()):
         total         = sum(prog_areas.values())
@@ -590,7 +632,7 @@ def automate_function(
         }
         zone_issue_objects += [
             obj for obj in generic_models
-            if (get_param_value(obj, function_inputs.zone_parameter_name) or "") in flagged_zones
+            if element_metadata.get(getattr(obj, "id", None) or id(obj), {}).get("zone") in flagged_zones
         ]
 
     # ── 7. Attach error pins to objects in Speckle viewer ────────────────────
@@ -613,15 +655,15 @@ def automate_function(
     summary_lines.extend(debug_info)
     
     # Show sample of per-object areas
-    objs_with_areas = [(meta["level"], meta["zone"], meta.get("dia_2_raw"), meta["area"]) 
+    objs_with_areas = [(meta["level"], meta["zone"], meta.get("area_raw"), meta["area"]) 
                        for meta in element_metadata.values() if meta.get("area", 0) > 0]
     if objs_with_areas:
         summary_lines.append("")
-        summary_lines.append("Sample objects with calculated areas (first 20):")
-        for level, zone, dia_raw, area in objs_with_areas[:20]:
-            # Extract numeric from dia_raw if dict
-            dia_num = dia_raw.get("value") if isinstance(dia_raw, dict) else dia_raw if dia_raw else "?"
-            summary_lines.append(f"  Level={level}, Zone={zone}, DIA-2={dia_num}, Area={area} m²")
+        summary_lines.append("Sample objects with extracted areas (first 20):")
+        for level, zone, area_raw, area in objs_with_areas[:20]:
+            # Extract numeric from area_raw if dict
+            area_param_val = area_raw.get("value") if isinstance(area_raw, dict) else area_raw if area_raw else "?"
+            summary_lines.append(f"  Level={level}, Zone={zone}, Area Parameter={area_param_val}, Extracted Area={area} m²")
     
     summary_lines.append("")
 
@@ -685,6 +727,41 @@ def automate_function(
     csv_rows.append({"Level": "Total Programs", "Program": "", "Area": unique_programs, "Status": ""})
     csv_rows.append({"Level": "OK Entries", "Program": "", "Area": ok_count, "Status": ""})
     csv_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": mono_count, "Status": ""})
+
+    # ── 10.5. Add Program Block aggregation (total area per program by occupancy with timing breakdown) ───────────────────────────────────────────
+    # Calculate total area for each program AND occupancy combination, plus timing-based areas
+    program_occupancy_areas = defaultdict(lambda: defaultdict(float))  # {program: {occupancy: area}}
+    
+    for meta in element_metadata.values():
+        program = meta.get("program", "Unknown")
+        occupancy = meta.get("occupancy", "Unknown")
+        area = meta.get("area", 0)
+        program_occupancy_areas[program][occupancy] += area
+    
+    # Add program block section to CSV with timing-based columns
+    csv_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
+    csv_rows.append({"Level": "OCCUPANCY TIMING BREAKDOWN", "Program": "OCCUPANCY GROUP", "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
+    
+    for occupancy in sorted(set(meta.get("occupancy", "Unknown") for meta in element_metadata.values())):
+        # Get timing-based areas for this occupancy
+        timing_areas = get_area_by_timing(occupancy)
+        
+        # Calculate total area for this occupancy across all programs
+        total_occupancy_area = sum(
+            meta.get("area", 0) 
+            for meta in element_metadata.values() 
+            if meta.get("occupancy", "Unknown") == occupancy
+        )
+        
+        csv_rows.append({
+            "Level": occupancy,
+            "Program": "AREAS BY TIMING",
+            "Area": round(total_occupancy_area, 2),
+            "Area_OffPeak": timing_areas["off_peak"],
+            "Area_Morning": timing_areas["morning"],
+            "Area_Afternoon": timing_areas["afternoon"],
+            "Area_Evening": timing_areas["evening"],
+        })
 
     # ── 11. Export Excel file result ──────────────────────────────────────────
     
