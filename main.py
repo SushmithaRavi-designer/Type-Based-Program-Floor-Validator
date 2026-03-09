@@ -266,28 +266,100 @@ class ThresholdMode(str, Enum):
 # Timing-based Area Calculation
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Timing bands (seconds):
+#   Off-Peak : Timing > 75600 OR Timing < 32400  → 700 mm (all occupancies)
+#   Morning  : 32400 ≤ Timing < 43200
+#   Afternoon: 43200 ≤ Timing < 61200
+#   Evening  : 61200 ≤ Timing < 75600
+# Source formula: if(or(Timing>75600,Timing<32400), 700mm, if(occupancy, ...))
+# All values in mm; exported as m² (÷ 1,000,000)
+
+TIMING_AREAS_MM: dict = {
+    #              off_peak  morning  afternoon  evening
+    "Medical":     { "off_peak": 700, "morning": 56000, "afternoon": 70000, "evening": 42000 },
+    "Hotel":       { "off_peak": 700, "morning": 28000, "afternoon": 35000, "evening": 63000 },
+    "Transit":     { "off_peak": 700, "morning": 63000, "afternoon": 70000, "evening": 49000 },
+    "Entertainment":{"off_peak": 700, "morning": 14000, "afternoon": 28000, "evening": 70000 },
+    "Corporate":   { "off_peak": 700, "morning": 59500, "afternoon": 70000, "evening": 21000 },
+    "WorkAdmin":   { "off_peak": 700, "morning": 56000, "afternoon": 66500, "evening": 14000 },
+    "SkyZone":     { "off_peak": 700, "morning": 28000, "afternoon": 49000, "evening": 70000 },
+    "Voids":       { "off_peak": 14000,"morning": 14000, "afternoon": 14000, "evening": 14000},
+}
+
+# Human-readable time band labels and example times for Sheet 2
+TIMING_BANDS = [
+    {"key": "off_peak",  "label": "Off-Peak",  "time_range": ">75600s or <32400s", "example": "00:00 / 22:00"},
+    {"key": "morning",   "label": "Morning",   "time_range": "32400–43200s",        "example": "09:00–12:00"},
+    {"key": "afternoon", "label": "Afternoon", "time_range": "43200–61200s",        "example": "12:00–17:00"},
+    {"key": "evening",   "label": "Evening",   "time_range": "61200–75600s",        "example": "17:00–21:00"},
+]
+
+
 def get_area_by_timing(occupancy: str, timing_seconds: float = None) -> dict:
-    occupancy_areas = {
-        "Medical":       {"off_peak": 700,   "morning": 56000, "afternoon": 70000, "evening": 42000},
-        "Hotel":         {"off_peak": 700,   "morning": 28000, "afternoon": 35000, "evening": 63000},
-        "Transit":       {"off_peak": 700,   "morning": 63000, "afternoon": 70000, "evening": 49000},
-        "Entertainment": {"off_peak": 700,   "morning": 14000, "afternoon": 28000, "evening": 70000},
-        "Corporate":     {"off_peak": 700,   "morning": 59500, "afternoon": 70000, "evening": 21000},
-        "WorkAdmin":     {"off_peak": 700,   "morning": 56000, "afternoon": 66500, "evening": 14000},
-        "SkyZone":       {"off_peak": 700,   "morning": 28000, "afternoon": 49000, "evening": 70000},
-        "Voids":         {"off_peak": 14000, "morning": 14000, "afternoon": 14000, "evening": 14000},
+    """Return area (m²) for each time band for the given occupancy.
+    
+    If timing_seconds is provided, also returns 'current' key with the active band value.
+    All values converted from mm to m² (÷ 1,000,000).
+    """
+    areas_mm = TIMING_AREAS_MM.get(occupancy, TIMING_AREAS_MM["Voids"])
+
+    result = {
+        "off_peak":  round(areas_mm["off_peak"]  / 1_000_000, 6),
+        "morning":   round(areas_mm["morning"]   / 1_000_000, 6),
+        "afternoon": round(areas_mm["afternoon"] / 1_000_000, 6),
+        "evening":   round(areas_mm["evening"]   / 1_000_000, 6),
     }
 
-    if occupancy not in occupancy_areas:
-        occupancy = "Voids"
+    # Optionally resolve the active band
+    if timing_seconds is not None:
+        if timing_seconds > 75600 or timing_seconds < 32400:
+            result["current"] = result["off_peak"]
+        elif 32400 <= timing_seconds < 43200:
+            result["current"] = result["morning"]
+        elif 43200 <= timing_seconds < 61200:
+            result["current"] = result["afternoon"]
+        else:
+            result["current"] = result["evening"]
 
-    areas_mm = occupancy_areas[occupancy]
-    return {
-        "off_peak":  round(areas_mm["off_peak"]  / 1_000_000, 4),
-        "morning":   round(areas_mm["morning"]   / 1_000_000, 4),
-        "afternoon": round(areas_mm["afternoon"] / 1_000_000, 4),
-        "evening":   round(areas_mm["evening"]   / 1_000_000, 4),
-    }
+    return result
+
+
+def build_timing_sheet_rows() -> list:
+    """Build rows for the Occupancy Timing Sheet (Sheet 2).
+    
+    Produces a table: Occupancy × Time Band → Area (mm) + Area (m²)
+    This directly mirrors the formula:
+      if(or(Timing>75600,Timing<32400), 700mm, if(Medical, ...), ...)
+    """
+    rows = []
+
+    # Header
+    rows.append({
+        "Occupancy":        "Occupancy",
+        "Time Band":        "Time Band",
+        "Time Range (s)":   "Time Range (s)",
+        "Example Clock":    "Example Clock",
+        "Area (mm)":        "Area (mm)",
+        "Area (m²)":        "Area (m²)",
+    })
+
+    for occupancy, bands in TIMING_AREAS_MM.items():
+        for band in TIMING_BANDS:
+            key       = band["key"]
+            area_mm   = bands[key]
+            area_m2   = round(area_mm / 1_000_000, 6)
+            rows.append({
+                "Occupancy":      occupancy,
+                "Time Band":      band["label"],
+                "Time Range (s)": band["time_range"],
+                "Example Clock":  band["example"],
+                "Area (mm)":      area_mm,
+                "Area (m²)":      area_m2,
+            })
+        # Blank separator between occupancies
+        rows.append({})
+
+    return rows
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -349,6 +421,15 @@ class FunctionInputs(AutomateBase):
         default=ReportLevel.DETAILED,
         title="Report Detail Level",
         description="SUMMARY: Basic statistics only | DETAILED: Full analysis | VERBOSE: Include all metadata",
+    )
+    google_apps_script_url: str = Field(
+        default="",
+        title="Google Apps Script Web App URL",
+        description=(
+            "Paste your deployed Apps Script Web App URL here. "
+            "Data will be POSTed directly and a live Google Sheets link returned. "
+            "Leave blank to skip (file attachment used instead)."
+        ),
     )
 
 
@@ -687,65 +768,109 @@ def automate_function(
     all_csv_rows.append({"Occupancy": "OK Entries",              "Level": "", "Program": "", "Area": ok_count,                "Status": ""})
     all_csv_rows.append({"Occupancy": "MONO-FUNCTIONAL Entries", "Level": "", "Program": "", "Area": mono_count,              "Status": ""})
 
-    # ── 11. Export — single file (one sheet / one CSV) ───────────────────────
+    # ── 11. Export ────────────────────────────────────────────────────────────
     import urllib.parse
+    import urllib.request
 
     if not all_csv_rows:
         all_csv_rows = [{"Occupancy": "No data", "Level": "", "Program": "", "Area": 0, "Status": ""}]
 
-    if function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
-        export_format = "CSV (for Google Sheets)"
+    total_area_val     = sum(meta.get("area", 0) for meta in element_metadata.values())
+    total_elements     = len(element_metadata)
+    unique_occupancies = sorted(floor_data_by_occupancy.keys())
+    csv_content_str    = rows_to_csv(all_csv_rows)
 
-        csv_content_str = rows_to_csv(all_csv_rows)
-        tmp_file = tempfile.NamedTemporaryFile(
-            suffix=".csv", delete=False,
-            prefix="program_floor_analysis_",
-            mode='w', encoding='utf-8',
-        )
-        tmp_file.write(csv_content_str)
-        tmp_file.close()
-
+    # ── Always store file attachment ──────────────────────────────────────────
+    tmp_file = tempfile.NamedTemporaryFile(
+        suffix=".csv", delete=False,
+        prefix="program_floor_analysis_",
+        mode='w', encoding='utf-8',
+    )
+    tmp_file.write(csv_content_str)
+    tmp_file.close()
+    try:
+        automate_context.store_file_result(tmp_file.name)
+    except Exception:
+        pass
+    finally:
         try:
-            automate_context.store_file_result(tmp_file.name)
+            if os.path.exists(tmp_file.name):
+                os.unlink(tmp_file.name)
         except Exception:
             pass
-        finally:
-            try:
-                if os.path.exists(tmp_file.name):
-                    os.unlink(tmp_file.name)
-            except Exception:
-                pass
 
-    else:
-        export_format = "Excel"
-        # Single sheet named "Analysis"
-        csv_content = rows_to_excel_multi_sheet({"Analysis": all_csv_rows})
+    # Also export Excel with Sheet 2 — Occupancy Timing breakdown
+    try:
+        timing_rows = build_timing_sheet_rows()
+        excel_path = rows_to_excel_multi_sheet({
+            "Analysis": all_csv_rows,
+            "Occupancy Timing": timing_rows,
+        })
         try:
-            automate_context.store_file_result(csv_content)
+            automate_context.store_file_result(excel_path)
         finally:
-            if os.path.exists(csv_content):
-                os.unlink(csv_content)
+            if os.path.exists(excel_path):
+                os.unlink(excel_path)
+    except Exception:
+        pass
+
+    # ── POST to Google Apps Script Web App (if URL provided) ─────────────────
+    sheet_url = ""
+    gas_url = (function_inputs.google_apps_script_url or "").strip()
+
+    if gas_url:
+        try:
+            payload = json.dumps({
+                "sheetTitle": "Program_Floor_Analysis",
+                "rows": all_csv_rows,
+                "timingRows": build_timing_sheet_rows(),
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                gas_url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            # Apps Script redirects (302) to the sheet — follow redirect
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                response_body = resp.read().decode("utf-8")
+                # Apps Script returns JSON: {"status": "ok", "sheetUrl": "https://..."}
+                try:
+                    result = json.loads(response_body)
+                    sheet_url = result.get("sheetUrl", "")
+                except Exception:
+                    # If plain URL returned directly
+                    if response_body.startswith("http"):
+                        sheet_url = response_body.strip()
+        except Exception as e:
+            sheet_url = f"ERROR: {e}"
 
     if issues:
         automate_context.set_context_view()
 
     # ── 12. Mark success ──────────────────────────────────────────────────────
-    total_area_val = sum(meta.get("area", 0) for meta in element_metadata.values())
-    total_elements = len(element_metadata)
-    unique_occupancies = sorted(floor_data_by_occupancy.keys())
-
-    sheet_title = "Program_Floor_Analysis"
-    title_encoded = urllib.parse.quote(sheet_title, safe='')
-    gs_link = f"https://docs.google.com/spreadsheets/create?title={title_encoded}"
+    if sheet_url and not sheet_url.startswith("ERROR"):
+        gs_section = f"📊 GOOGLE SHEETS — Click to open live data:\n  🔗 {sheet_url}\n"
+    elif sheet_url.startswith("ERROR"):
+        gs_section = (
+            f"⚠️  Google Sheets POST failed: {sheet_url}\n"
+            f"  Check your Apps Script URL in Function Settings.\n"
+        )
+    else:
+        gs_section = (
+            "📊 GOOGLE SHEETS:\n"
+            "  Paste your Apps Script Web App URL in Function Settings\n"
+            "  to get a direct clickable link next run.\n"
+            "  (CSV file attached above for manual import)\n"
+        )
 
     success_msg = (
-        f"✅ Program floor analysis complete ({export_format} format — single sheet)\n"
+        f"✅ Program floor analysis complete (single sheet)\n"
         f"Processed: {total_elements} elements | {len(floor_data)} levels | "
         f"{len(zone_data)} zones | {len(collection_data)} collection(s)\n"
         f"Total area: {total_area_val:.2f} m² | Occupancies: {', '.join(unique_occupancies)}\n\n"
-        f"📊 GOOGLE SHEETS:\n"
-        f"  🔗 Create new sheet: {gs_link}\n"
-        f"  📋 Then: File > Import > Upload the downloaded CSV\n"
+        f"{gs_section}"
     )
 
     automate_context.mark_run_success(success_msg)
