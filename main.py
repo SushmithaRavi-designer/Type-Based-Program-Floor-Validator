@@ -632,9 +632,11 @@ def automate_function(
         }
 
     # ── 5. KPIs and CSV rows — single flat sheet ─────────────────────────────
-    all_csv_rows: list = []   # single list for one sheet / one CSV
+    # csv_rows_per_collection: {collection_name: [rows]}  — one file per collection
+    csv_rows_per_collection: dict = {name: [] for name in collections_models.keys()}
+    all_csv_rows: list = []   # global aggregate (for Apps Script / summary)
     issues = []
-    zone_issue_object_ids = []   # collect speckle object IDs, not metadata dicts
+    zone_issue_object_ids = []
 
     stacking = vertical_stacking_continuity(dict(floor_data))
 
@@ -665,17 +667,28 @@ def automate_function(
             timing_areas = get_area_by_timing(occupancy)
 
             for program, area in sorted(prog_areas.items()):
-                all_csv_rows.append({
-                    "Occupancy":       occupancy,
-                    "Level":           level,
-                    "Program":         program,
-                    "Area":            round(area, 2),
-                    "Status":          level_status,
-                    "Area_OffPeak":    timing_areas["off_peak"],
-                    "Area_Morning":    timing_areas["morning"],
-                    "Area_Afternoon":  timing_areas["afternoon"],
-                    "Area_Evening":    timing_areas["evening"],
-                })
+                row = {
+                    "Occupancy":      occupancy,
+                    "Level":          level,
+                    "Program":        program,
+                    "Area":           round(area, 2),
+                    "Status":         level_status,
+                    "Area_OffPeak":   timing_areas["off_peak"],
+                    "Area_Morning":   timing_areas["morning"],
+                    "Area_Afternoon": timing_areas["afternoon"],
+                    "Area_Evening":   timing_areas["evening"],
+                }
+                all_csv_rows.append(row)
+
+                # Also add to every collection whose elements contributed to this
+                # occupancy+level+program combination
+                for coll_name, coll_meta in collection_data.items():
+                    coll_floor_occ = coll_meta.get("floor_data_by_occupancy", {})
+                    coll_prog_areas = coll_floor_occ.get(occupancy, {}).get(level, {})
+                    if program in coll_prog_areas:
+                        coll_row = dict(row)
+                        coll_row["Area"] = round(coll_prog_areas[program], 2)
+                        csv_rows_per_collection[coll_name].append(coll_row)
 
     # ── 6. Zone compatibility ─────────────────────────────────────────────────
     zone_issues = check_zone_compatibility(dict(zone_data), thresholds, default_threshold)
@@ -757,118 +770,117 @@ def automate_function(
             f"  Report Level: {function_inputs.report_level.value}",
         ]
 
-    # ── 10. Append overall summary rows to single sheet ───────────────────────
-    total_area_all  = sum(meta.get("area", 0) for meta in element_metadata.values())
-    ok_count        = sum(1 for row in all_csv_rows if row.get("Status") == "OK")
-    mono_count      = sum(1 for row in all_csv_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
-
-    all_csv_rows.append({})   # blank separator row
-    all_csv_rows.append({"Occupancy": "SUMMARY", "Level": "AGGREGATION SUMMARY", "Program": "", "Area": "", "Status": ""})
-    all_csv_rows.append({"Occupancy": "Total Area (m²)",         "Level": "", "Program": "", "Area": round(total_area_all, 2), "Status": ""})
-    all_csv_rows.append({"Occupancy": "OK Entries",              "Level": "", "Program": "", "Area": ok_count,                "Status": ""})
-    all_csv_rows.append({"Occupancy": "MONO-FUNCTIONAL Entries", "Level": "", "Program": "", "Area": mono_count,              "Status": ""})
-
-    # ── 11. Export ────────────────────────────────────────────────────────────
+    # ── 10. Summary rows ─────────────────────────────────────────────────────
     import urllib.parse
     import urllib.request
 
-    if not all_csv_rows:
-        all_csv_rows = [{"Occupancy": "No data", "Level": "", "Program": "", "Area": 0, "Status": ""}]
-
-    total_area_val     = sum(meta.get("area", 0) for meta in element_metadata.values())
-    total_elements     = len(element_metadata)
+    timing_rows    = build_timing_sheet_rows()
+    total_area_val = sum(meta.get("area", 0) for meta in element_metadata.values())
+    total_elements = len(element_metadata)
     unique_occupancies = sorted(floor_data_by_occupancy.keys())
-    csv_content_str    = rows_to_csv(all_csv_rows)
 
-    # ── Always store file attachment ──────────────────────────────────────────
-    tmp_file = tempfile.NamedTemporaryFile(
-        suffix=".csv", delete=False,
-        prefix="program_floor_analysis_",
-        mode='w', encoding='utf-8',
-    )
-    tmp_file.write(csv_content_str)
-    tmp_file.close()
-    try:
-        automate_context.store_file_result(tmp_file.name)
-    except Exception:
-        pass
-    finally:
+    def _append_summary(rows: list, area_total: float) -> None:
+        ok_c   = sum(1 for r in rows if r.get("Status") == "OK")
+        mono_c = sum(1 for r in rows if "MONO-FUNCTIONAL" in r.get("Status", ""))
+        rows.append({})
+        rows.append({"Occupancy": "SUMMARY", "Level": "AGGREGATION SUMMARY", "Program": "", "Area": "", "Status": ""})
+        rows.append({"Occupancy": "Total Area (m²)",         "Level": "", "Program": "", "Area": round(area_total, 2), "Status": ""})
+        rows.append({"Occupancy": "OK Entries",              "Level": "", "Program": "", "Area": ok_c,                "Status": ""})
+        rows.append({"Occupancy": "MONO-FUNCTIONAL Entries", "Level": "", "Program": "", "Area": mono_c,              "Status": ""})
+
+    # Append summaries to global + per-collection rows
+    _append_summary(all_csv_rows, total_area_val)
+    for coll_name, coll_rows in csv_rows_per_collection.items():
+        coll_area = sum(
+            meta.get("area", 0) for meta in element_metadata.values()
+            if meta.get("collection") == coll_name
+        )
+        if coll_rows:
+            _append_summary(coll_rows, coll_area)
+        else:
+            coll_rows.append({"Occupancy": "No data", "Level": "", "Program": "", "Area": 0, "Status": ""})
+
+    # ── 11. Export — one Excel file per collection ────────────────────────────
+    sheet_urls = {}   # {coll_name: google_sheets_url}
+    gas_url = (function_inputs.google_apps_script_url or "").strip()
+
+    for coll_name, coll_rows in csv_rows_per_collection.items():
+        safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in coll_name)
+
+        # Excel: Sheet1=Analysis, Sheet2=Occupancy Timing
         try:
-            if os.path.exists(tmp_file.name):
-                os.unlink(tmp_file.name)
+            excel_path = rows_to_excel_multi_sheet({
+                "Analysis":        coll_rows,
+                "Occupancy Timing": timing_rows,
+            })
+            # Rename temp file to include collection name for clarity
+            named_path = excel_path.replace(".xlsx", f"_{safe_name}.xlsx")
+            try:
+                os.rename(excel_path, named_path)
+                excel_path = named_path
+            except Exception:
+                pass
+            try:
+                automate_context.store_file_result(excel_path)
+            finally:
+                if os.path.exists(excel_path):
+                    os.unlink(excel_path)
         except Exception:
             pass
 
-    # Also export Excel with Sheet 2 — Occupancy Timing breakdown
-    try:
-        timing_rows = build_timing_sheet_rows()
-        excel_path = rows_to_excel_multi_sheet({
-            "Analysis": all_csv_rows,
-            "Occupancy Timing": timing_rows,
-        })
-        try:
-            automate_context.store_file_result(excel_path)
-        finally:
-            if os.path.exists(excel_path):
-                os.unlink(excel_path)
-    except Exception:
-        pass
-
-    # ── POST to Google Apps Script Web App (if URL provided) ─────────────────
-    sheet_url = ""
-    gas_url = (function_inputs.google_apps_script_url or "").strip()
-
-    if gas_url:
-        try:
-            payload = json.dumps({
-                "sheetTitle": "Program_Floor_Analysis",
-                "rows": all_csv_rows,
-                "timingRows": build_timing_sheet_rows(),
-            }).encode("utf-8")
-
-            req = urllib.request.Request(
-                gas_url,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            # Apps Script redirects (302) to the sheet — follow redirect
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                response_body = resp.read().decode("utf-8")
-                # Apps Script returns JSON: {"status": "ok", "sheetUrl": "https://..."}
-                try:
-                    result = json.loads(response_body)
-                    sheet_url = result.get("sheetUrl", "")
-                except Exception:
-                    # If plain URL returned directly
-                    if response_body.startswith("http"):
-                        sheet_url = response_body.strip()
-        except Exception as e:
-            sheet_url = f"ERROR: {e}"
+        # POST to Google Apps Script per collection
+        if gas_url:
+            try:
+                sheet_title = f"Program_Floor_{safe_name}"
+                payload = json.dumps({
+                    "sheetTitle": sheet_title,
+                    "rows":       coll_rows,
+                    "timingRows": timing_rows,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    gas_url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    response_body = resp.read().decode("utf-8")
+                    try:
+                        result = json.loads(response_body)
+                        url = result.get("sheetUrl", "")
+                    except Exception:
+                        url = response_body.strip() if response_body.startswith("http") else ""
+                    if url:
+                        sheet_urls[coll_name] = url
+            except Exception as ex:
+                sheet_urls[coll_name] = f"ERROR: {ex}"
 
     if issues:
         automate_context.set_context_view()
 
     # ── 12. Mark success ──────────────────────────────────────────────────────
-    if sheet_url and not sheet_url.startswith("ERROR"):
-        gs_section = f"📊 GOOGLE SHEETS — Click to open live data:\n  🔗 {sheet_url}\n"
-    elif sheet_url.startswith("ERROR"):
-        gs_section = (
-            f"⚠️  Google Sheets POST failed: {sheet_url}\n"
-            f"  Check your Apps Script URL in Function Settings.\n"
-        )
+    coll_names = list(csv_rows_per_collection.keys())
+
+    if sheet_urls:
+        gs_lines = ["📊 GOOGLE SHEETS (click to open):"]
+        for cname, url in sheet_urls.items():
+            if url.startswith("ERROR"):
+                gs_lines.append(f"  ⚠️  {cname}: {url}")
+            else:
+                gs_lines.append(f"  🔗 {cname}: {url}")
+        gs_section = "\n".join(gs_lines) + "\n"
     else:
         gs_section = (
             "📊 GOOGLE SHEETS:\n"
-            "  Paste your Apps Script Web App URL in Function Settings\n"
-            "  to get a direct clickable link next run.\n"
-            "  (CSV file attached above for manual import)\n"
+            "  Add your Apps Script Web App URL in Function Settings\n"
+            "  to get direct clickable links next run.\n"
         )
 
     success_msg = (
-        f"✅ Program floor analysis complete (single sheet)\n"
+        f"✅ Program floor analysis complete — {len(coll_names)} attachment(s)\n"
+        f"Collections: {', '.join(coll_names)}\n"
         f"Processed: {total_elements} elements | {len(floor_data)} levels | "
-        f"{len(zone_data)} zones | {len(collection_data)} collection(s)\n"
+        f"{len(zone_data)} zones\n"
         f"Total area: {total_area_val:.2f} m² | Occupancies: {', '.join(unique_occupancies)}\n\n"
         f"{gs_section}"
     )
