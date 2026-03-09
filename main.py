@@ -544,149 +544,149 @@ def automate_function(
         coll_element_metadata = {}
         
         for obj in generic_models:
-        # Program/Zone/Floor extracted from Type Name (e.g., "MEDICAL_ZoneA_LEVEL10")
-        raw_type = get_param_value(obj, "Type Name") or ""
+            # Program/Zone/Floor extracted from Type Name (e.g., "MEDICAL_ZoneA_LEVEL10")
+            raw_type = get_param_value(obj, "Type Name") or ""
+            
+            # If still empty, try common alternative names
+            if not raw_type:
+                for alt_name in ["Type Name", "Family Type", "Type", "Name", "name", "typeName"]:
+                    raw_type = get_param_value(obj, alt_name)
+                    if raw_type:
+                        break
+            
+            # Last resort: try direct attributes
+            if not raw_type:
+                raw_type = getattr(obj, "Type Name", "") or getattr(obj, "type_name", "") or getattr(obj, "name", "") or ""
         
-        # If still empty, try common alternative names
-        if not raw_type:
-            for alt_name in ["Type Name", "Family Type", "Type", "Name", "name", "typeName"]:
-                raw_type = get_param_value(obj, alt_name)
-                if raw_type:
-                    break
-        
-        # Last resort: try direct attributes
-        if not raw_type:
-            raw_type = getattr(obj, "Type Name", "") or getattr(obj, "type_name", "") or getattr(obj, "name", "") or ""
-        
-        # Parse Type Name into Program, Zone, Level (e.g., "MEDICAL_ZoneA_LEVEL10" → MEDICAL, ZoneA, LEVEL10)
-        program, zone_from_name, floor_from_name = parse_type_name(raw_type)
-        
-        # Zone: First try parsed zone from Type Name, otherwise use Type/Family name as zone (common name)
-        if zone_from_name != "Unknown":
-            zone = zone_from_name
-        else:
-            # Use Type or Family name as zone (e.g., "HOTELS", "blocks", "MEDICAL")
-            zone = get_param_value(obj, "Type") or get_param_value(obj, "Family") or get_param_value(obj, "Family Type") or "Unknown"
-        
-        if not zone:
-            zone = "Unknown"
+            # Parse Type Name into Program, Zone, Level (e.g., "MEDICAL_ZoneA_LEVEL10" → MEDICAL, ZoneA, LEVEL10)
+            program, zone_from_name, floor_from_name = parse_type_name(raw_type)
+            
+            # Zone: First try parsed zone from Type Name, otherwise use Type/Family name as zone (common name)
+            if zone_from_name != "Unknown":
+                zone = zone_from_name
+            else:
+                # Use Type or Family name as zone (e.g., "HOTELS", "blocks", "MEDICAL")
+                zone = get_param_value(obj, "Type") or get_param_value(obj, "Family") or get_param_value(obj, "Family Type") or "Unknown"
+            
+            if not zone:
+                zone = "Unknown"
 
-        # Floor / Level: Use level parsed from Type Name, fallback to level extraction
-        level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, "Level")
-        if not level:
-            level = "Unknown"
+            # Floor / Level: Use level parsed from Type Name, fallback to level extraction
+            level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, "Level")
+            if not level:
+                level = "Unknown"
 
-        # Extract material color from Revit material object (if enabled)
-        material_color = None
-        if function_inputs.color_extraction_mode == ColorExtractionMode.ENABLED:
-            # First try to get from actual Revit material object
-            material_color = get_material_color(obj, "Material")
-        if not material_color:
-            material_color = "Not Found"
+            # Extract material color from Revit material object (if enabled)
+            material_color = None
+            if function_inputs.color_extraction_mode == ColorExtractionMode.ENABLED:
+                # First try to get from actual Revit material object
+                material_color = get_material_color(obj, "Material")
+            if not material_color:
+                material_color = "Not Found"
 
-        # Extract occupancy/group name from properties
-        occupancy = "Unknown"
-        properties = getattr(obj, "properties", None)
-        if isinstance(properties, dict):
-            occupancy = properties.get("groupname") or "Unknown"
-        elif properties is not None:
-            occupancy = getattr(properties, "groupname", "Unknown") or "Unknown"
-        
-        if not occupancy or occupancy == "Unknown":
+            # Extract occupancy/group name from properties
             occupancy = "Unknown"
+            properties = getattr(obj, "properties", None)
+            if isinstance(properties, dict):
+                occupancy = properties.get("groupname") or "Unknown"
+            elif properties is not None:
+                occupancy = getattr(properties, "groupname", "Unknown") or "Unknown"
+            
+            if not occupancy or occupancy == "Unknown":
+                occupancy = "Unknown"
 
-        # Area: Extract from Instance Parameters → Area
-        # Path: obj.properties["Parameters"]["Type Parameters"]["Instance Parameters"]["Area"]
-        area = 0.0
-        area_raw = None
-        
-        properties = getattr(obj, "properties", None)
-        if isinstance(properties, dict):
-            params = properties.get("Parameters")  # Note: capital P
-            if isinstance(params, dict):
-                type_params = params.get("Type Parameters")
-                if isinstance(type_params, dict):
-                    instance_params = type_params.get("Instance Parameters")
-                    if isinstance(instance_params, dict):
-                        area_raw = instance_params.get("Area")
-                        
-                        if area_raw is not None:
-                            # Area may be a string like "60" or a dict like {"value": 60, "units": "m²"}
-                            if isinstance(area_raw, dict):
-                                area_numeric = area_raw.get("value")
-                            else:
-                                area_numeric = extract_numeric_value(str(area_raw))
+            # Area: Extract from Instance Parameters → Area
+            # Path: obj.properties["Parameters"]["Type Parameters"]["Instance Parameters"]["Area"]
+            area = 0.0
+            area_raw = None
+            
+            properties = getattr(obj, "properties", None)
+            if isinstance(properties, dict):
+                params = properties.get("Parameters")  # Note: capital P
+                if isinstance(params, dict):
+                    type_params = params.get("Type Parameters")
+                    if isinstance(type_params, dict):
+                        instance_params = type_params.get("Instance Parameters")
+                        if isinstance(instance_params, dict):
+                            area_raw = instance_params.get("Area")
                             
-                            if area_numeric and area_numeric > 0:
-                                try:
-                                    area = round(float(area_numeric), 2)
-                                except (ValueError, TypeError):
-                                    area = 0.0
-        
-        # Fallback: Try to extract Area from get_param_value if not found above
-        if area == 0.0:
-            area_fallback = get_param_value(obj, "Area")
-            if area_fallback:
-                area_numeric = extract_numeric_value(str(area_fallback))
-                if area_numeric and area_numeric > 0:
-                    try:
-                        area = round(float(area_numeric), 2)
-                        area_raw = area_fallback
-                    except (ValueError, TypeError):
-                        area = 0.0
-        
-        # Second fallback: Try alternative parameter names
-        if area == 0.0:
-            for alt_area_name in ["Instance Area", "Computed Area", "Area m2", "AreaM2"]:
-                area_fallback = get_param_value(obj, alt_area_name)
+                            if area_raw is not None:
+                                # Area may be a string like "60" or a dict like {"value": 60, "units": "m²"}
+                                if isinstance(area_raw, dict):
+                                    area_numeric = area_raw.get("value")
+                                else:
+                                    area_numeric = extract_numeric_value(str(area_raw))
+                                
+                                if area_numeric and area_numeric > 0:
+                                    try:
+                                        area = round(float(area_numeric), 2)
+                                    except (ValueError, TypeError):
+                                        area = 0.0
+            
+            # Fallback: Try to extract Area from get_param_value if not found above
+            if area == 0.0:
+                area_fallback = get_param_value(obj, "Area")
                 if area_fallback:
                     area_numeric = extract_numeric_value(str(area_fallback))
                     if area_numeric and area_numeric > 0:
                         try:
                             area = round(float(area_numeric), 2)
                             area_raw = area_fallback
-                            break
                         except (ValueError, TypeError):
-                            pass
+                            area = 0.0
+            
+            # Second fallback: Try alternative parameter names
+            if area == 0.0:
+                for alt_area_name in ["Instance Area", "Computed Area", "Area m2", "AreaM2"]:
+                    area_fallback = get_param_value(obj, alt_area_name)
+                    if area_fallback:
+                        area_numeric = extract_numeric_value(str(area_fallback))
+                        if area_numeric and area_numeric > 0:
+                            try:
+                                area = round(float(area_numeric), 2)
+                                area_raw = area_fallback
+                                break
+                            except (ValueError, TypeError):
+                                pass
 
-        # Calculate timing-based areas for this occupancy
-        timing_areas = get_area_by_timing(occupancy)
+            # Calculate timing-based areas for this occupancy
+            timing_areas = get_area_by_timing(occupancy)
 
-        # Store metadata
-        obj_id = getattr(obj, "id", None) or id(obj)
-        metadata_entry = {
-            "program": program,
-            "zone": zone,
-            "level": level,
-            "occupancy": occupancy,
-            "material_color": material_color,
-            "area": area,
-            "area_off_peak": timing_areas["off_peak"],
-            "area_morning": timing_areas["morning"],
-            "area_afternoon": timing_areas["afternoon"],
-            "area_evening": timing_areas["evening"],
-            "speckle_type": getattr(obj, "speckle_type", "Unknown"),
-            "area_raw": area_raw,  # DEBUG: track what Area was extracted
-            "collection": collection_name,  # Track which collection this element belongs to
-        }
-        
-        coll_element_metadata[obj_id] = metadata_entry
-        element_metadata[obj_id] = metadata_entry
+            # Store metadata
+            obj_id = getattr(obj, "id", None) or id(obj)
+            metadata_entry = {
+                "program": program,
+                "zone": zone,
+                "level": level,
+                "occupancy": occupancy,
+                "material_color": material_color,
+                "area": area,
+                "area_off_peak": timing_areas["off_peak"],
+                "area_morning": timing_areas["morning"],
+                "area_afternoon": timing_areas["afternoon"],
+                "area_evening": timing_areas["evening"],
+                "speckle_type": getattr(obj, "speckle_type", "Unknown"),
+                "area_raw": area_raw,  # DEBUG: track what Area was extracted
+                "collection": collection_name,  # Track which collection this element belongs to
+            }
+            
+            coll_element_metadata[obj_id] = metadata_entry
+            element_metadata[obj_id] = metadata_entry
 
-        # Track colors by program for reporting
-        if material_color and material_color != "Not Found":
-            if program not in coll_material_colors:
-                coll_material_colors[program] = material_color
+            # Track colors by program for reporting
+            if material_color and material_color != "Not Found":
+                if program not in coll_material_colors:
+                    coll_material_colors[program] = material_color
 
-        coll_floor_data[level][program] += area
-        coll_floor_data_by_occupancy[occupancy][level][program] += area
-        coll_zone_data[zone][program]   += area
-        
-        # Aggregate to global data
-        floor_data[level][program] += area
-        floor_data_by_occupancy[occupancy][level][program] += area
-        zone_data[zone][program]   += area
-        material_colors.update(coll_material_colors)
+            coll_floor_data[level][program] += area
+            coll_floor_data_by_occupancy[occupancy][level][program] += area
+            coll_zone_data[zone][program]   += area
+            
+            # Aggregate to global data
+            floor_data[level][program] += area
+            floor_data_by_occupancy[occupancy][level][program] += area
+            zone_data[zone][program]   += area
+            material_colors.update(coll_material_colors)
         
         # End: for obj in generic_models (per collection loop)
     
