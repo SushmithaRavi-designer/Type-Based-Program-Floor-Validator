@@ -178,22 +178,53 @@ def _extract_area_from_dimensions(obj) -> float:
 
 
 def _parse_area_value(raw) -> float:
-    """Parse area from string, number, or dict {"value": ..., "units": ...}."""
+    """Parse area from string, number, or dict {"value": ..., "units": ...}.
+    
+    Auto-detects units and converts to m²:
+    - If units contain 'ft' or 'feet' → convert from ft² to m² (÷ 10.764)
+    - If units contain 'mm' → convert from mm² to m² (÷ 1,000,000)
+    - Otherwise assume m²
+    """
     if raw is None:
         return 0.0
+    
+    # Handle dict with value and units
+    if isinstance(raw, dict):
+        val = raw.get("value")
+        units = str(raw.get("units", "")).lower()
+        area_value = _parse_area_value(val)  # Recursive parse value
+        
+        if area_value > 0:
+            # Unit conversion
+            if "ft" in units or "feet" in units:
+                # Convert ft² to m²
+                return round(area_value / 10.764, 2)
+            elif "mm" in units and "m" not in units.replace("mm", ""):
+                # Convert mm² to m² (only if it's mm, not m)
+                return round(area_value / 1_000_000, 2)
+        return area_value
+    
+    # Handle numeric value
     if isinstance(raw, (int, float)):
         try:
             return round(float(raw), 2) if float(raw) > 0 else 0.0
         except (ValueError, TypeError):
             return 0.0
-    if isinstance(raw, dict):
-        val = raw.get("value")
-        return _parse_area_value(val)
-    # String — strip units and parse
-    numeric = extract_numeric_value(str(raw))
+    
+    # Handle string - check for units in the string
+    raw_str = str(raw).strip().lower()
+    numeric = extract_numeric_value(raw_str)
     if numeric:
         try:
-            return round(float(numeric), 2) if float(numeric) > 0 else 0.0
+            area_value = float(numeric)
+            if area_value > 0:
+                # Check for units in string
+                if "ft" in raw_str or "feet" in raw_str:
+                    return round(area_value / 10.764, 2)
+                elif "mm" in raw_str and "²" in raw_str:
+                    return round(area_value / 1_000_000, 2)
+                else:
+                    return round(area_value, 2)
         except (ValueError, TypeError):
             pass
     return 0.0
@@ -807,11 +838,39 @@ def automate_function(
     for coll_name, coll_rows in csv_rows_per_collection.items():
         safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in coll_name)
 
-        # Excel: Sheet1=Analysis, Sheet2=Occupancy Timing
+        # Split data into 2 sheets:
+        # Sheet 1: Program Data (Occupancy, Level, Program, Area, Status only)
+        # Sheet 2: Occupancy Flow (Occupancy, Level, Program + timing areas)
+        
+        program_data_rows = []
+        occupancy_flow_rows = []
+        
+        for row in coll_rows:
+            # Sheet 1: Program data (simple columns)
+            program_data_rows.append({
+                "Occupancy": row.get("Occupancy", ""),
+                "Level": row.get("Level", ""),
+                "Program": row.get("Program", ""),
+                "Area": row.get("Area", ""),
+                "Status": row.get("Status", ""),
+            })
+            
+            # Sheet 2: Occupancy flow (with timing areas)
+            occupancy_flow_rows.append({
+                "Occupancy": row.get("Occupancy", ""),
+                "Level": row.get("Level", ""),
+                "Program": row.get("Program", ""),
+                "Area_OffPeak": row.get("Area_OffPeak", ""),
+                "Area_Morning": row.get("Area_Morning", ""),
+                "Area_Afternoon": row.get("Area_Afternoon", ""),
+                "Area_Evening": row.get("Area_Evening", ""),
+            })
+        
+        # Excel: Sheet1=Program Data, Sheet2=Occupancy Flow
         try:
             excel_path = rows_to_excel_multi_sheet({
-                "Analysis":        coll_rows,
-                "Occupancy Timing": timing_rows,
+                "Program Data": program_data_rows,
+                "Occupancy Flow": occupancy_flow_rows,
             })
             # Rename temp file to include collection name for clarity
             named_path = excel_path.replace(".xlsx", f"_{safe_name}.xlsx")
@@ -834,8 +893,8 @@ def automate_function(
                 sheet_title = f"Program_Floor_{safe_name}"
                 payload = json.dumps({
                     "sheetTitle": sheet_title,
-                    "rows":       coll_rows,
-                    "timingRows": timing_rows,
+                    "programRows": program_data_rows,
+                    "flowRows": occupancy_flow_rows,
                 }).encode("utf-8")
                 req = urllib.request.Request(
                     gas_url,
