@@ -592,35 +592,102 @@ def automate_function(
             if not occupancy or occupancy == "Unknown":
                 occupancy = "Unknown"
 
-            # Area: Extract from Instance Parameters → Area
-            # Path: obj.properties["Parameters"]["Type Parameters"]["Instance Parameters"]["Area"]
+            # Area: PRIMARY - Extract from Dimensions under Parameters in properties
+            # Paths to check (in priority order):
+            # 1. properties["Parameters"]["Dimensions"]["Area"]
+            # 2. properties["Parameters"]["Type Parameters"]["Dimensions"]["Area"]
+            # 3. properties["Parameters"]["Type Parameters"]["Instance Parameters"]["Dimensions"]["Area"]
             area = 0.0
             area_raw = None
             
             properties = getattr(obj, "properties", None)
             if isinstance(properties, dict):
-                params = properties.get("Parameters")  # Note: capital P
+                # Check path 1: Parameters.Dimensions
+                params = properties.get("Parameters")
                 if isinstance(params, dict):
-                    type_params = params.get("Type Parameters")
-                    if isinstance(type_params, dict):
-                        instance_params = type_params.get("Instance Parameters")
-                        if isinstance(instance_params, dict):
-                            area_raw = instance_params.get("Area")
+                    dimensions = params.get("Dimensions")
+                    if isinstance(dimensions, dict):
+                        area_raw = dimensions.get("Area")
+                        if area_raw is not None:
+                            if isinstance(area_raw, dict):
+                                area_numeric = area_raw.get("value")
+                            else:
+                                area_numeric = extract_numeric_value(str(area_raw))
                             
-                            if area_raw is not None:
-                                # Area may be a string like "60" or a dict like {"value": 60, "units": "m²"}
-                                if isinstance(area_raw, dict):
-                                    area_numeric = area_raw.get("value")
-                                else:
-                                    area_numeric = extract_numeric_value(str(area_raw))
-                                
-                                if area_numeric and area_numeric > 0:
-                                    try:
-                                        area = round(float(area_numeric), 2)
-                                    except (ValueError, TypeError):
-                                        area = 0.0
+                            if area_numeric and area_numeric > 0:
+                                try:
+                                    area = round(float(area_numeric), 2)
+                                except (ValueError, TypeError):
+                                    area = 0.0
+                
+                # Check path 2: Parameters.Type Parameters.Dimensions
+                if area == 0.0:
+                    params = properties.get("Parameters")
+                    if isinstance(params, dict):
+                        type_params = params.get("Type Parameters")
+                        if isinstance(type_params, dict):
+                            dimensions = type_params.get("Dimensions")
+                            if isinstance(dimensions, dict):
+                                area_raw = dimensions.get("Area")
+                                if area_raw is not None:
+                                    if isinstance(area_raw, dict):
+                                        area_numeric = area_raw.get("value")
+                                    else:
+                                        area_numeric = extract_numeric_value(str(area_raw))
+                                    
+                                    if area_numeric and area_numeric > 0:
+                                        try:
+                                            area = round(float(area_numeric), 2)
+                                        except (ValueError, TypeError):
+                                            area = 0.0
+                
+                # Check path 3: Parameters.Type Parameters.Instance Parameters.Dimensions
+                if area == 0.0:
+                    params = properties.get("Parameters")
+                    if isinstance(params, dict):
+                        type_params = params.get("Type Parameters")
+                        if isinstance(type_params, dict):
+                            instance_params = type_params.get("Instance Parameters")
+                            if isinstance(instance_params, dict):
+                                dimensions = instance_params.get("Dimensions")
+                                if isinstance(dimensions, dict):
+                                    area_raw = dimensions.get("Area")
+                                    if area_raw is not None:
+                                        if isinstance(area_raw, dict):
+                                            area_numeric = area_raw.get("value")
+                                        else:
+                                            area_numeric = extract_numeric_value(str(area_raw))
+                                        
+                                        if area_numeric and area_numeric > 0:
+                                            try:
+                                                area = round(float(area_numeric), 2)
+                                            except (ValueError, TypeError):
+                                                area = 0.0
             
-            # Fallback: Try to extract Area from get_param_value if not found above
+            # Fallback: Try to extract Area from direct Instance Parameters
+            if area == 0.0:
+                properties = getattr(obj, "properties", None)
+                if isinstance(properties, dict):
+                    params = properties.get("Parameters")
+                    if isinstance(params, dict):
+                        type_params = params.get("Type Parameters")
+                        if isinstance(type_params, dict):
+                            instance_params = type_params.get("Instance Parameters")
+                            if isinstance(instance_params, dict):
+                                area_raw = instance_params.get("Area")
+                                if area_raw is not None:
+                                    if isinstance(area_raw, dict):
+                                        area_numeric = area_raw.get("value")
+                                    else:
+                                        area_numeric = extract_numeric_value(str(area_raw))
+                                    
+                                    if area_numeric and area_numeric > 0:
+                                        try:
+                                            area = round(float(area_numeric), 2)
+                                        except (ValueError, TypeError):
+                                            area = 0.0
+            
+            # Second fallback: Try get_param_value with Area
             if area == 0.0:
                 area_fallback = get_param_value(obj, "Area")
                 if area_fallback:
@@ -632,7 +699,7 @@ def automate_function(
                         except (ValueError, TypeError):
                             area = 0.0
             
-            # Second fallback: Try alternative parameter names
+            # Third fallback: Try alternative parameter names
             if area == 0.0:
                 for alt_area_name in ["Instance Area", "Computed Area", "Area m2", "AreaM2"]:
                     area_fallback = get_param_value(obj, alt_area_name)
@@ -645,29 +712,6 @@ def automate_function(
                                 break
                             except (ValueError, TypeError):
                                 pass
-
-            # Third fallback: Try extracting from properties → Instance Parameters → Dimensions → Area
-            if area == 0.0:
-                properties = getattr(obj, "properties", None)
-                if isinstance(properties, dict):
-                    instance_params = properties.get("Instance Parameters")
-                    if isinstance(instance_params, dict):
-                        dimensions = instance_params.get("Dimensions")
-                        if isinstance(dimensions, dict):
-                            area_from_dims = dimensions.get("Area")
-                            if area_from_dims is not None:
-                                # Handle dict or numeric value
-                                if isinstance(area_from_dims, dict):
-                                    area_numeric = area_from_dims.get("value")
-                                else:
-                                    area_numeric = extract_numeric_value(str(area_from_dims))
-                                
-                                if area_numeric and area_numeric > 0:
-                                    try:
-                                        area = round(float(area_numeric), 2)
-                                        area_raw = area_from_dims
-                                    except (ValueError, TypeError):
-                                        pass
 
             # Calculate timing-based areas for this occupancy
             timing_areas = get_area_by_timing(occupancy)
@@ -778,7 +822,6 @@ def automate_function(
                 csv_rows_by_occupancy[occupancy].append({
                     "Level":    level,
                     "Program":  program,
-                    "Area":     round(area, 2),
                     "Status":   level_status,
                 })
 
@@ -889,31 +932,15 @@ def automate_function(
         occupancy_rows = csv_rows_by_occupancy[occupancy]
         
         # Add summary separator and data
-        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
-        occupancy_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
+        occupancy_rows.append({"Level": "", "Program": "", "Status": ""})
+        occupancy_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Status": ""})
         
         # Calculate occupancy-specific stats
-        occupancy_area = sum(meta.get('area', 0) for meta in element_metadata.values() if meta.get('occupancy') == occupancy)
         occupancy_ok = sum(1 for row in occupancy_rows if row.get("Status") == "OK")
         occupancy_mono = sum(1 for row in occupancy_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
         
-        occupancy_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(occupancy_area, 2), "Status": ""})
-        occupancy_rows.append({"Level": "OK Entries", "Program": "", "Area": occupancy_ok, "Status": ""})
-        occupancy_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": occupancy_mono, "Status": ""})
-        
-        # Add timing breakdown for this occupancy
-        timing_areas = get_area_by_timing(occupancy)
-        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
-        occupancy_rows.append({"Level": "TIMING AREAS", "Program": occupancy, "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
-        occupancy_rows.append({
-            "Level": occupancy,
-            "Program": "REFERENCE VALUES",
-            "Area": round(occupancy_area, 2),
-            "Area_OffPeak": timing_areas["off_peak"],
-            "Area_Morning": timing_areas["morning"],
-            "Area_Afternoon": timing_areas["afternoon"],
-            "Area_Evening": timing_areas["evening"],
-        })
+        occupancy_rows.append({"Level": "OK Entries", "Program": str(occupancy_ok), "Status": ""})
+        occupancy_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": str(occupancy_mono), "Status": ""})
 
     # ── 10.5. Add Program Block aggregation (total area per program by occupancy with timing breakdown) ───────────────────────────────────────────
     # Calculate total area for each program AND occupancy combination, plus timing-based areas
