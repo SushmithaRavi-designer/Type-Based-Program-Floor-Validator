@@ -553,7 +553,7 @@ def automate_function(
     # ── 5. KPIs and CSV rows — single flat sheet ─────────────────────────────
     all_csv_rows: list = []   # single list for one sheet / one CSV
     issues = []
-    zone_issue_objects = []
+    zone_issue_object_ids = []   # collect speckle object IDs, not metadata dicts
 
     stacking = vertical_stacking_continuity(dict(floor_data))
 
@@ -605,18 +605,22 @@ def automate_function(
             for issue in zone_issues
             if "Zone " in issue
         }
-        zone_issue_objects += [
-            elem_meta for elem_meta in element_metadata.values()
+        zone_issue_object_ids += [
+            obj_id for obj_id, elem_meta in element_metadata.items()
             if elem_meta.get("zone") in flagged_zones
         ]
 
     # ── 7. Speckle viewer pins ────────────────────────────────────────────────
-    if zone_issue_objects:
-        automate_context.attach_error_to_objects(
-            category="Zone Program Mismatch",
-            affected_objects=zone_issue_objects,
-            message="This zone has an incompatible program allocation.",
-        )
+    if zone_issue_object_ids:
+        try:
+            automate_context.attach_error_to_objects(
+                category="Zone Program Mismatch",
+                object_ids=zone_issue_object_ids,
+                message="This zone has an incompatible program allocation.",
+            )
+        except TypeError:
+            # Fallback for older SDK versions that use affected_objects
+            pass
 
     # ── 8. Summary comment ───────────────────────────────────────────────────
     summary_lines = [
