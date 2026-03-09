@@ -646,6 +646,29 @@ def automate_function(
                             except (ValueError, TypeError):
                                 pass
 
+            # Third fallback: Try extracting from properties → Instance Parameters → Dimensions → Area
+            if area == 0.0:
+                properties = getattr(obj, "properties", None)
+                if isinstance(properties, dict):
+                    instance_params = properties.get("Instance Parameters")
+                    if isinstance(instance_params, dict):
+                        dimensions = instance_params.get("Dimensions")
+                        if isinstance(dimensions, dict):
+                            area_from_dims = dimensions.get("Area")
+                            if area_from_dims is not None:
+                                # Handle dict or numeric value
+                                if isinstance(area_from_dims, dict):
+                                    area_numeric = area_from_dims.get("value")
+                                else:
+                                    area_numeric = extract_numeric_value(str(area_from_dims))
+                                
+                                if area_numeric and area_numeric > 0:
+                                    try:
+                                        area = round(float(area_numeric), 2)
+                                        area_raw = area_from_dims
+                                    except (ValueError, TypeError):
+                                        pass
+
             # Calculate timing-based areas for this occupancy
             timing_areas = get_area_by_timing(occupancy)
 
@@ -995,23 +1018,18 @@ def automate_function(
     total_area_val = sum(meta.get('area', 0) for meta in element_metadata.values())
     family_count = len(unique_occupancies)
     total_elements = len(element_metadata)
-    collection_summary = "\n\n📁 COLLECTIONS PROCESSED:\n" + "\n".join(
-        f"  {coll_name}: {coll['model_count']} elements, Area: {sum(meta.get('area', 0) for meta in coll['element_metadata'].values()):.2f} m²"
-        for coll_name, coll in collection_data.items()
-    )
     
     # Always build Google Sheets links (even if Excel format is selected)
-    google_sheets_links = "\n\n📊 GOOGLE SHEETS IMPORT LINKS (per family):\n"
+    google_sheets_links = "📊 GOOGLE SHEETS LINKS:\n"
     for unique_family in unique_occupancies:
         gs_link = _generate_google_sheets_import_link(unique_family)
-        google_sheets_links += f"  ✓ {unique_family}: {gs_link}\n"
-    google_sheets_links += "\nINSTRUCTIONS:\n1. Click the link above to create a new Google Sheet\n2. Go to File → Import → Upload the CSV file from downloads\n3. Select 'Replace spreadsheet' and confirm"
+        google_sheets_links += f"  {unique_family}: {gs_link}\n"
     
+    # Short, concise success message that won't get truncated
     success_msg = (
-        f"Program floor analysis complete ({export_format} format with {family_count} families).\n"
-        f"Processed {total_elements} elements across {len(floor_data)} levels and {len(zone_data)} zones from {len(collection_data)} collection(s).\n"
-        f"Total area: {total_area_val:.2f} m². Exported {family_count} sheet(s)/file(s) for family groups: {', '.join(unique_occupancies)}"
-        f"{collection_summary}"
+        f"✅ Program floor analysis complete ({export_format} format, {family_count} families)\n"
+        f"Processed: {total_elements} elements | {len(floor_data)} levels | {len(zone_data)} zones | {len(collection_data)} collection(s)\n"
+        f"Total area: {total_area_val:.2f} m² | Families: {', '.join(unique_occupancies)}\n\n"
         f"{google_sheets_links}"
     )
     
