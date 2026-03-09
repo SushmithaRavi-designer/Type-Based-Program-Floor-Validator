@@ -381,10 +381,7 @@ def automate_function(
     if collections:
         for collection_name, collection_obj in collections.items():
             generic_models = _get_generic_models_from_object(collection_obj)
-            if generic_models:
-                automate_context.log(f"Processing collection: {collection_name} with {len(generic_models)} elements")
-            else:
-                automate_context.log(f"Skipping collection: {collection_name} (no processable elements)")
+            # Collections detected, will process below
     else:
         # Fallback: If no collections, process all objects from root
         all_objects = list(flatten_base(version_root_object))
