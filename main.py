@@ -250,6 +250,54 @@ def get_area_by_timing(occupancy: str, timing_seconds: float = None) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Collection Detection Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_collections_from_root(root_object) -> dict:
+    """Extract all collections from the root object.
+    
+    Returns:
+        dict: {collection_name: collection_object}
+    """
+    collections = {}
+    
+    # Try to access elements attribute
+    elements = getattr(root_object, "elements", [])
+    if elements:
+        for item in elements:
+            # Check if item is a collection (has speckle_type attribute containing "Collection")
+            speckle_type = getattr(item, "speckle_type", "")
+            if "Collection" in speckle_type:
+                collection_name = getattr(item, "name", f"Collection_{len(collections)}")
+                collections[collection_name] = item
+    
+    return collections
+
+
+def _get_generic_models_from_object(obj) -> list:
+    """Extract generic models (processable objects) from a single object or collection.
+    
+    Args:
+        obj: Could be root object, collection, or any Speckle object
+        
+    Returns:
+        list: Flattened list of processable generic models
+    """
+    flattened = list(flatten_base(obj))
+    generic_models = _find_processable_objects(flattened)
+    
+    # Prefer objects categorized as Generic Models if present
+    generic_models_prefer = [
+        o for o in generic_models
+        if "Generic Model" in str(getattr(o, "category", ""))
+    ]
+    if generic_models_prefer:
+        generic_models = generic_models_prefer
+    
+    return generic_models
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Input Schema
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -326,38 +374,65 @@ def automate_function(
     # ── 1. Receive the triggering version ─────────────────────────────────────
     version_root_object = automate_context.receive_version()
 
-    # ── 2. Flatten all objects and filter Generic Models ──────────────────────
-    all_objects = list(flatten_base(version_root_object))
+    # ── 2. Detect collections in the model ────────────────────────────────────
+    collections = _get_collections_from_root(version_root_object)
     
-    # Find any objects that appear to contain parameter/type data. This
-    # function is deliberately permissive to handle variations in exports.
-    generic_models = _find_processable_objects(all_objects)
+    # If collections exist, process each collection separately
+    if collections:
+        for collection_name, collection_obj in collections.items():
+            generic_models = _get_generic_models_from_object(collection_obj)
+            if generic_models:
+                automate_context.log(f"Processing collection: {collection_name} with {len(generic_models)} elements")
+            else:
+                automate_context.log(f"Skipping collection: {collection_name} (no processable elements)")
+    else:
+        # Fallback: If no collections, process all objects from root
+        all_objects = list(flatten_base(version_root_object))
+        
+        # Find any objects that appear to contain parameter/type data. This
+        # function is deliberately permissive to handle variations in exports.
+        generic_models = _find_processable_objects(all_objects)
 
-    # Prefer objects categorized as Generic Models if present
-    generic_models_prefer = [
-        obj for obj in generic_models
-        if "Generic Model" in str(getattr(obj, "category", ""))
-    ]
-    if generic_models_prefer:
-        generic_models = generic_models_prefer
+        # Prefer objects categorized as Generic Models if present
+        generic_models_prefer = [
+            obj for obj in generic_models
+            if "Generic Model" in str(getattr(obj, "category", ""))
+        ]
+        if generic_models_prefer:
+            generic_models = generic_models_prefer
+        
+        # Wrap in a single-collection format for uniform processing
+        collections = {"Model": version_root_object}
 
-    if not generic_models:
+    # ── 2.5. Extract objects from each collection for processing ──────────────
+    # Build a dict of collection_name -> list of generic_models
+    collections_models = {}
+    for collection_name, collection_obj in collections.items():
+        collection_generic_models = _get_generic_models_from_object(collection_obj)
+        if collection_generic_models:
+            collections_models[collection_name] = collection_generic_models
+
+    if not collections_models:
         automate_context.mark_run_failed(
-            f"No processable elements found. Total objects: {len(all_objects)}. "
-            "Checked for objects with parameters (including nested in properties.parameters). "
+            "No processable elements found in any collection. "
             "Ensure your model contains Revit elements exported with Type Parameters dimension data."
         )
         return
 
-    # ── 2.5. Debug: Inspect available parameters in first element ──────────────
+    # ── 2.7. Debug: Inspect available parameters in first element ──────────────
     # This helps identify what parameters are actually available in the model
     debug_info = []
-    debug_info.append(f"Total objects: {len(all_objects)}, Processing: {len(generic_models)} Generic Models")
+    total_models = sum(len(models) for models in collections_models.values())
+    debug_info.append(f"Collections detected: {len(collections_models)}, Total processable models: {total_models}")
     
-    if generic_models:
-        first_obj = generic_models[0]
-        
-        # Show object type
+    # Get first object from first collection for inspection
+    first_obj = None
+    for models in collections_models.values():
+        if models:
+            first_obj = models[0]
+            break
+    
+    if first_obj:
         debug_info.append(f"speckle_type: {getattr(first_obj, 'speckle_type', 'NOT FOUND')}")
         debug_info.append(f"category: {getattr(first_obj, 'category', 'NOT FOUND')}")
         debug_info.append(f"type: {getattr(first_obj, 'type', 'NOT FOUND')}")
@@ -448,14 +523,27 @@ def automate_function(
         # Custom mode: use values as-is
         default_threshold = function_inputs.default_threshold
 
-    # ── 4. Extract program / zone / floor / area per element ──────────────────
+    # ── 4. Extract program / zone / floor / area per element (per collection) ──
+    # Initialize data tracking for each collection
+    collection_data = {}  # {collection_name: {data_dict}}
+    
+    # Global aggregations across all collections
     floor_data: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     zone_data:  dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    floor_data_by_occupancy: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))  # {occupancy: {level: {program: area}}}
-    material_colors: dict[str, str] = {}  # Track material colors by element
-    element_metadata: dict = {}  # Store complete element metadata with level and color
-
-    for obj in generic_models:
+    floor_data_by_occupancy: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    material_colors: dict[str, str] = {}
+    element_metadata: dict = {}
+    
+    # Process each collection separately
+    for collection_name, generic_models in collections_models.items():
+        # Initialize data structures for this collection
+        coll_floor_data = defaultdict(lambda: defaultdict(float))
+        coll_zone_data = defaultdict(lambda: defaultdict(float))
+        coll_floor_data_by_occupancy = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        coll_material_colors = {}
+        coll_element_metadata = {}
+        
+        for obj in generic_models:
         # Program/Zone/Floor extracted from Type Name (e.g., "MEDICAL_ZoneA_LEVEL10")
         raw_type = get_param_value(obj, "Type Name") or ""
         
@@ -566,7 +654,7 @@ def automate_function(
 
         # Store metadata
         obj_id = getattr(obj, "id", None) or id(obj)
-        element_metadata[obj_id] = {
+        metadata_entry = {
             "program": program,
             "zone": zone,
             "level": level,
@@ -579,16 +667,40 @@ def automate_function(
             "area_evening": timing_areas["evening"],
             "speckle_type": getattr(obj, "speckle_type", "Unknown"),
             "area_raw": area_raw,  # DEBUG: track what Area was extracted
+            "collection": collection_name,  # Track which collection this element belongs to
         }
+        
+        coll_element_metadata[obj_id] = metadata_entry
+        element_metadata[obj_id] = metadata_entry
 
         # Track colors by program for reporting
         if material_color and material_color != "Not Found":
-            if program not in material_colors:
-                material_colors[program] = material_color
+            if program not in coll_material_colors:
+                coll_material_colors[program] = material_color
 
+        coll_floor_data[level][program] += area
+        coll_floor_data_by_occupancy[occupancy][level][program] += area
+        coll_zone_data[zone][program]   += area
+        
+        # Aggregate to global data
         floor_data[level][program] += area
         floor_data_by_occupancy[occupancy][level][program] += area
         zone_data[zone][program]   += area
+        material_colors.update(coll_material_colors)
+        
+        # End: for obj in generic_models (per collection loop)
+    
+    # Store this collection's data
+    collection_data[collection_name] = {
+        "floor_data": coll_floor_data,
+        "zone_data": coll_zone_data,
+        "floor_data_by_occupancy": coll_floor_data_by_occupancy,
+        "material_colors": coll_material_colors,
+        "element_metadata": coll_element_metadata,
+        "model_count": len(list(generic_models)) if generic_models else 0,
+    }
+    
+    # End: for collection_name, generic_models in collections_models.items() (collection loop)
 
     # ── 5. Compute KPIs, build CSV rows per occupancy, collect issues ───────────────────────
     csv_rows_by_occupancy: dict[str, list] = defaultdict(list)  # {occupancy: [rows]}
@@ -663,8 +775,8 @@ def automate_function(
             if "Zone " in issue
         }
         zone_issue_objects += [
-            obj for obj in generic_models
-            if element_metadata.get(getattr(obj, "id", None) or id(obj), {}).get("zone") in flagged_zones
+            elem_meta for elem_meta in element_metadata.values()
+            if elem_meta.get("zone") in flagged_zones
         ]
 
     # ── 7. Attach error pins to objects in Speckle viewer ────────────────────
@@ -742,40 +854,53 @@ def automate_function(
 
     # Validation report is exported as CSV file via store_file_result()
 
-    # ── 10. Add aggregation summary to each occupancy sheet
+    # ── 10. Add aggregation summary to Excel ──────────────────────────────────
     
-    # Calculate overall statistics
+    # Calculate summary statistics
     total_area = sum(meta.get('area', 0) for meta in element_metadata.values())
-    all_ok_count = sum(1 for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if row.get("Status") == "OK")
-    all_mono_count = sum(1 for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
-    all_unique_levels = len(set(row.get("Level", "") for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if row.get("Level")))
-    all_unique_programs = len(set(row.get("Program", "") for occupancy_rows in csv_rows_by_occupancy.values() for row in occupancy_rows if row.get("Program")))
+    ok_count = sum(1 for row in csv_rows if row.get("Status") == "OK")
+    mono_count = sum(1 for row in csv_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
+    unique_levels = len(set(row.get("Level", "") for row in csv_rows if row.get("Level")))
+    unique_programs = len(set(row.get("Program", "") for row in csv_rows if row.get("Program")))
     
-    # Add summary and timing info to each occupancy's sheet
-    for occupancy in csv_rows_by_occupancy.keys():
-        occupancy_rows = csv_rows_by_occupancy[occupancy]
-        
-        # Add summary separator and data
-        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
-        occupancy_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
-        
-        # Calculate occupancy-specific stats
-        occupancy_area = sum(meta.get('area', 0) for meta in element_metadata.values() if meta.get('occupancy') == occupancy)
-        occupancy_ok = sum(1 for row in occupancy_rows if row.get("Status") == "OK")
-        occupancy_mono = sum(1 for row in occupancy_rows if "MONO-FUNCTIONAL" in row.get("Status", ""))
-        
-        occupancy_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(occupancy_area, 2), "Status": ""})
-        occupancy_rows.append({"Level": "OK Entries", "Program": "", "Area": occupancy_ok, "Status": ""})
-        occupancy_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": occupancy_mono, "Status": ""})
-        
-        # Add timing breakdown for this occupancy
+    # Add summary separator and data
+    csv_rows.append({"Level": "", "Program": "", "Area": "", "Status": ""})
+    csv_rows.append({"Level": "SUMMARY", "Program": "AGGREGATION SUMMARY", "Area": "", "Status": ""})
+    csv_rows.append({"Level": "Total Area (m2)", "Program": "", "Area": round(total_area, 2), "Status": ""})
+    csv_rows.append({"Level": "Total Levels", "Program": "", "Area": unique_levels, "Status": ""})
+    csv_rows.append({"Level": "Total Programs", "Program": "", "Area": unique_programs, "Status": ""})
+    csv_rows.append({"Level": "OK Entries", "Program": "", "Area": ok_count, "Status": ""})
+    csv_rows.append({"Level": "MONO-FUNCTIONAL Entries", "Program": "", "Area": mono_count, "Status": ""})
+
+    # ── 10.5. Add Program Block aggregation (total area per program by occupancy with timing breakdown) ───────────────────────────────────────────
+    # Calculate total area for each program AND occupancy combination, plus timing-based areas
+    program_occupancy_areas = defaultdict(lambda: defaultdict(float))  # {program: {occupancy: area}}
+    
+    for meta in element_metadata.values():
+        program = meta.get("program", "Unknown")
+        occupancy = meta.get("occupancy", "Unknown")
+        area = meta.get("area", 0)
+        program_occupancy_areas[program][occupancy] += area
+    
+    # Add program block section to CSV with timing-based columns
+    csv_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
+    csv_rows.append({"Level": "OCCUPANCY TIMING BREAKDOWN", "Program": "OCCUPANCY GROUP", "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
+    
+    for occupancy in sorted(set(meta.get("occupancy", "Unknown") for meta in element_metadata.values())):
+        # Get timing-based areas for this occupancy
         timing_areas = get_area_by_timing(occupancy)
-        occupancy_rows.append({"Level": "", "Program": "", "Area": "", "Area_OffPeak": "", "Area_Morning": "", "Area_Afternoon": "", "Area_Evening": ""})
-        occupancy_rows.append({"Level": "TIMING AREAS", "Program": occupancy, "Area": "Total Area", "Area_OffPeak": "Off-Peak (mm)", "Area_Morning": "Morning (mm)", "Area_Afternoon": "Afternoon (mm)", "Area_Evening": "Evening (mm)"})
-        occupancy_rows.append({
+        
+        # Calculate total area for this occupancy across all programs
+        total_occupancy_area = sum(
+            meta.get("area", 0) 
+            for meta in element_metadata.values() 
+            if meta.get("occupancy", "Unknown") == occupancy
+        )
+        
+        csv_rows.append({
             "Level": occupancy,
-            "Program": "REFERENCE VALUES",
-            "Area": round(occupancy_area, 2),
+            "Program": "AREAS BY TIMING",
+            "Area": round(total_occupancy_area, 2),
             "Area_OffPeak": timing_areas["off_peak"],
             "Area_Morning": timing_areas["morning"],
             "Area_Afternoon": timing_areas["afternoon"],
@@ -787,7 +912,7 @@ def automate_function(
     unique_occupancies = sorted(csv_rows_by_occupancy.keys())
     
     if function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
-        # Export as separate CSV files for each occupancy group
+        # Export as separate CSV files for each family
         export_format = "CSV (for Google Sheets)"
         csv_files = []
         
@@ -803,17 +928,24 @@ def automate_function(
             # Create CSV content
             csv_content_str = rows_to_csv(occupancy_rows)
             
-            # Write CSV to temporary file with occupancy name
+            # Create a properly named CSV file with occupancy in the filename
+            safe_occupancy = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in occupancy)
+            
             tmp_file = tempfile.NamedTemporaryFile(
-                suffix=f"_{occupancy}.csv",
+                suffix=".csv",
                 delete=False,
-                prefix="program_floor_validation_",
+                prefix=f"program_floor_validation_{safe_occupancy}_",
                 mode='w',
-                encoding='utf-8'
+                encoding='utf-8',
+                dir=None
             )
             tmp_file.write(csv_content_str)
             tmp_file.close()
-            csv_files.append(tmp_file.name)
+            csv_files.append({
+                'path': tmp_file.name,
+                'occupancy': occupancy,
+                'content': csv_content_str
+            })
             
             # Store each occupancy CSV as a separate result
             try:
@@ -821,16 +953,17 @@ def automate_function(
             except Exception:
                 pass
         
-        # Clean up all temporary files
-        for csv_file in csv_files:
+        # Clean up all temporary files (after storing)
+        for csv_file_info in csv_files:
             try:
-                if os.path.exists(csv_file):
-                    os.unlink(csv_file)
+                csv_file_path = csv_file_info['path'] if isinstance(csv_file_info, dict) else csv_file_info
+                if os.path.exists(csv_file_path):
+                    os.unlink(csv_file_path)
             except Exception:
                 pass
     
     else:
-        # Export as Excel with multiple sheets (one per occupancy)
+        # Export as Excel with multiple sheets (one per family)
         export_format = "Excel"
         excel_sheets = {}
         
@@ -863,11 +996,26 @@ def automate_function(
     # ── 12. Mark run success (always) ──────────────────────
     # Show only basic completion info in Speckle, details exported
     total_area_val = sum(meta.get('area', 0) for meta in element_metadata.values())
-    occupancy_count = len(unique_occupancies)
+    family_count = len(unique_occupancies)
+    total_elements = len(element_metadata)
+    collection_summary = "\n\n📁 COLLECTIONS PROCESSED:\n" + "\n".join(
+        f"  {coll_name}: {coll['model_count']} elements, Area: {sum(meta.get('area', 0) for meta in coll['element_metadata'].values()):.2f} m²"
+        for coll_name, coll in collection_data.items()
+    )
+    
+    # Always build Google Sheets links (even if Excel format is selected)
+    google_sheets_links = "\n\n📊 GOOGLE SHEETS IMPORT LINKS (per family):\n"
+    for unique_family in unique_occupancies:
+        gs_link = _generate_google_sheets_import_link(unique_family)
+        google_sheets_links += f"  ✓ {unique_family}: {gs_link}\n"
+    google_sheets_links += "\nINSTRUCTIONS:\n1. Click the link above to create a new Google Sheet\n2. Go to File → Import → Upload the CSV file from downloads\n3. Select 'Replace spreadsheet' and confirm"
+    
     success_msg = (
-        f"Program floor analysis complete ({export_format} format with {occupancy_count} occupancy groups).\n"
-        f"Processed {len(generic_models)} elements across {len(floor_data)} levels and {len(zone_data)} zones.\n"
-        f"Total area: {total_area_val:.2f} m². Exported {occupancy_count} sheet(s)/file(s) for occupancy groups: {', '.join(unique_occupancies)}"
+        f"Program floor analysis complete ({export_format} format with {family_count} families).\n"
+        f"Processed {total_elements} elements across {len(floor_data)} levels and {len(zone_data)} zones from {len(collection_data)} collection(s).\n"
+        f"Total area: {total_area_val:.2f} m². Exported {family_count} sheet(s)/file(s) for family groups: {', '.join(unique_occupancies)}"
+        f"{collection_summary}"
+        f"{google_sheets_links}"
     )
     
     automate_context.mark_run_success(success_msg)
@@ -876,6 +1024,21 @@ def automate_function(
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _generate_google_sheets_import_link(occupancy_name: str) -> str:
+    """
+    Generate a Google Sheets import link for CSV data.
+    Instructions: User opens the link to create a new sheet, then imports CSV via File > Import.
+    """
+    safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in occupancy_name)
+    sheet_name = f"Program_Floor_{safe_name}"
+    
+    # Direct link to create new Google Sheet
+    create_sheet_url = "https://docs.google.com/spreadsheets/create"
+    
+    # Return instruction with link
+    return f"{create_sheet_url}?title={sheet_name}"
+
 
 def _zones_for_program(zone_data: dict, program: str) -> str:
     matched = sorted(z for z, progs in zone_data.items() if program in progs)
