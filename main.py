@@ -835,6 +835,15 @@ def automate_function(
     gas_url = os.getenv("GOOGLE_APPS_SCRIPT_URL", "").strip()
 
     for coll_name, coll_rows in csv_rows_per_collection.items():
+        # Sort rows by level numerically, then by occupancy
+        import re
+        def _row_sort_key(r):
+            level_str = str(r.get("Level", ""))
+            m = re.search(r'(\d+)', level_str)
+            level_num = int(m.group(1)) if m else 0
+            return (level_num, r.get("Occupancy", ""), r.get("Program", ""))
+        coll_rows = sorted(coll_rows, key=_row_sort_key)
+        
         safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in coll_name)
 
         # Split data into 2 sheets:

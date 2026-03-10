@@ -44,22 +44,30 @@ def _get_client():
     """Build an authenticated gspread client.
 
     Credential resolution order:
-      1. GOOGLE_CREDENTIALS_FILE  — path to a service account JSON file
-      2. GOOGLE_CREDENTIALS_JSON  — raw JSON string (used in Speckle Automate secrets)
+      1. google_credentials.json in same directory as this script (deployed with code)
+      2. GOOGLE_CREDENTIALS_FILE env var — path to a service account JSON file
+      3. GOOGLE_CREDENTIALS_JSON env var — raw JSON string (Speckle Automate secrets)
     """
     import gspread
     from google.oauth2.service_account import Credentials
 
-    # 1. Try file path first (local dev with downloaded JSON key)
+    # 1. Try google_credentials.json in same directory (deployed with code)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    default_creds_file = os.path.join(script_dir, "google_credentials.json")
+    if os.path.isfile(default_creds_file):
+        creds = Credentials.from_service_account_file(default_creds_file, scopes=_SCOPES)
+        return gspread.authorize(creds)
+
+    # 2. Try file path from env var (local dev with downloaded JSON key)
     creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "").strip()
     # If relative path, resolve it relative to this script's directory
     if creds_file and not os.path.isabs(creds_file):
-        creds_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), creds_file)
+        creds_file = os.path.join(script_dir, creds_file)
     if creds_file and os.path.isfile(creds_file):
         creds = Credentials.from_service_account_file(creds_file, scopes=_SCOPES)
         return gspread.authorize(creds)
 
-    # 2. Try raw JSON string (Speckle Automate function variable)
+    # 3. Try raw JSON string (Speckle Automate function variable)
     creds_raw = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
     if creds_raw:
         creds_dict = json.loads(creds_raw)
@@ -67,8 +75,8 @@ def _get_client():
         return gspread.authorize(creds)
 
     raise EnvironmentError(
-        "No Google credentials found. Set GOOGLE_CREDENTIALS_FILE (path to JSON key file) "
-        "or GOOGLE_CREDENTIALS_JSON (raw JSON) in your .env or Speckle Automate function variables."
+        "No Google credentials found. Place google_credentials.json in the project root, "
+        "or set GOOGLE_CREDENTIALS_FILE / GOOGLE_CREDENTIALS_JSON."
     )
 
 

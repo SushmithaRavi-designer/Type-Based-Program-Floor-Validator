@@ -8,6 +8,7 @@ function_inputs.json
 *-b0-*.json
 symbolic-app-*.json
 .venv/Scripts/symbolic-app-*.json
+google_credentials.json
 
 **/.env
 **/.envrc
