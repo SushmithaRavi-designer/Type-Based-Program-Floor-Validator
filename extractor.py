@@ -392,6 +392,20 @@ def get_material_color(obj, color_param_name: str = "Material") -> Optional[str]
     return None
 
 
+def _clean_level_name(name: str) -> str:
+    """Strip trailing non-level words from a Revit level name.
+
+    E.g. "LEVEL 19 FLOOR PLAN" → "LEVEL 19"
+         "Level 3 - Plan View"  → "Level 3"
+    """
+    import re
+    # Remove everything after a dash separator
+    name = re.sub(r'\s*[-–—]\s*(FLOOR\s+PLANS?|PLANS?|VIEW|SECTION|ELEVATION|REFLECTED|RCP)\s*$', '', name, flags=re.IGNORECASE)
+    # Remove trailing standalone suffixes
+    name = re.sub(r'\s+(FLOOR\s+PLANS?|PLANS?|VIEW|SECTION|ELEVATION|REFLECTED|RCP)\s*$', '', name, flags=re.IGNORECASE)
+    return name.strip()
+
+
 def get_level_info(obj, level_param_name: str = "Level") -> Optional[str]:
     """
     Extract level/floor information from a Speckle object.
@@ -409,7 +423,7 @@ def get_level_info(obj, level_param_name: str = "Level") -> Optional[str]:
     # Try explicit level parameter (exact and case-insensitive)
     level_val = get_param_value(obj, level_param_name)
     if level_val:
-        return level_val.strip()
+        return _clean_level_name(level_val)
 
     # Try alternative level/floor parameter names
     alternative_names = ["Floor", "Story", "Storey", "Height", "Elevation", "Level Name", "LevelName"]
@@ -417,24 +431,20 @@ def get_level_info(obj, level_param_name: str = "Level") -> Optional[str]:
         if alt_name.lower() != level_param_name.lower():
             level_val = get_param_value(obj, alt_name)
             if level_val:
-                return level_val.strip()
-
-    # Try level object reference
-    level = getattr(obj, "level", None)
-    if level:
+                    return _clean_level_name(level_val)
         level_name = getattr(level, "name", None)
         if level_name:
-            return level_name.strip()
+            return _clean_level_name(level_name)
 
     # Try levelName direct property
     level_name = getattr(obj, "levelName", None)
     if level_name:
-        return level_name.strip()
+        return _clean_level_name(level_name)
     
     # Try direct Level property (sometimes Revit stores as numeric/string)
     direct_level = getattr(obj, "Level", None)
     if direct_level:
-        return str(direct_level).strip()
+        return _clean_level_name(str(direct_level))
 
     return None
 

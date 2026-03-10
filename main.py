@@ -594,7 +594,9 @@ def automate_function(
             if not zone:
                 zone = "Unknown"
 
-            level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, "Level")
+            _raw_level = floor_from_name if floor_from_name != "Unknown" else get_level_info(obj, "Level")
+            from extractor import _clean_level_name as _cln
+            level = _cln(_raw_level) if _raw_level and _raw_level != "Unknown" else (_raw_level or "Unknown")
             if not level:
                 level = "Unknown"
 
@@ -605,7 +607,7 @@ def automate_function(
             if not material_color:
                 material_color = "Not Found"
 
-            # Occupancy from groupname
+            # Occupancy from groupname, falling back to the type name (Generic Models type)
             occupancy = "Unknown"
             properties = getattr(obj, "properties", None)
             if isinstance(properties, dict):
@@ -613,7 +615,8 @@ def automate_function(
             elif properties is not None:
                 occupancy = getattr(properties, "groupname", "Unknown") or "Unknown"
             if not occupancy or occupancy == "Unknown":
-                occupancy = "Unknown"
+                # Fall back to the Generic Models type name (first segment of raw type)
+                occupancy = program if program and program != "Unknown" else (raw_type or "Unknown")
 
             # ── AREA: Use new dedicated extraction function ──────────────────
             area = _extract_area_from_dimensions(obj)
@@ -893,8 +896,8 @@ def automate_function(
                 sheet_title = f"Program_Floor_{safe_name}"
                 payload = json.dumps({
                     "sheetTitle": sheet_title,
-                    "programRows": program_data_rows,
-                    "flowRows": occupancy_flow_rows,
+                    "rows": coll_rows,
+                    "timingRows": build_timing_sheet_rows(),
                 }).encode("utf-8")
                 req = urllib.request.Request(
                     gas_url,
