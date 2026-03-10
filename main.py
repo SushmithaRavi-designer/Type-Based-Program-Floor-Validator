@@ -896,8 +896,8 @@ def automate_function(
                 build_timing_sheet_rows(),
             )
             sheet_urls[coll_name] = url
-        except EnvironmentError:
-            # Credentials not set up — fall back to GAS URL if provided
+        except EnvironmentError as env_err:
+            # Credentials not set up — fall back to GAS URL if provided, else record the hint
             if gas_url:
                 try:
                     sheet_title = f"Program_Floor_{safe_name}"
@@ -923,6 +923,8 @@ def automate_function(
                             sheet_urls[coll_name] = url
                 except Exception as ex:
                     sheet_urls[coll_name] = f"ERROR: {ex}"
+            else:
+                sheet_urls[coll_name] = f"ERROR (credentials): {env_err}"
         except Exception as ex:
             sheet_urls[coll_name] = f"ERROR: {ex}"
 

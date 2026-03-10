@@ -15,11 +15,11 @@ import json
 import os
 from typing import Optional
 
-# Load .env file automatically (local dev). In production (Speckle Automate)
-# the function variables are already in the environment — dotenv is a no-op.
+# Load .env relative to THIS file's directory (works locally and in Speckle Automate)
 try:
     from dotenv import load_dotenv
-    load_dotenv(override=False)  # won't overwrite already-set env vars
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    load_dotenv(dotenv_path=_env_path, override=False)
 except ImportError:
     pass  # python-dotenv not installed, environment vars must be set externally
 
@@ -52,6 +52,9 @@ def _get_client():
 
     # 1. Try file path first (local dev with downloaded JSON key)
     creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "").strip()
+    # If relative path, resolve it relative to this script's directory
+    if creds_file and not os.path.isabs(creds_file):
+        creds_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), creds_file)
     if creds_file and os.path.isfile(creds_file):
         creds = Credentials.from_service_account_file(creds_file, scopes=_SCOPES)
         return gspread.authorize(creds)
@@ -67,8 +70,6 @@ def _get_client():
         "No Google credentials found. Set GOOGLE_CREDENTIALS_FILE (path to JSON key file) "
         "or GOOGLE_CREDENTIALS_JSON (raw JSON) in your .env or Speckle Automate function variables."
     )
-    creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
-    return gspread.authorize(creds)
 
 
 def _get_or_create_spreadsheet(gc, title: str):

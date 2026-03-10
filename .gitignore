@@ -7,6 +7,7 @@ function_inputs.json
 **/*.json.key
 *-b0-*.json
 symbolic-app-*.json
+.venv/Scripts/symbolic-app-*.json
 
 **/.env
 **/.envrc
