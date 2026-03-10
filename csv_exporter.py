@@ -297,7 +297,12 @@ def rows_to_floor_summary_csv(floor_data: dict, stacking: dict, thresholds: dict
     writer = csv.DictWriter(buf, fieldnames=summary_cols)
     writer.writeheader()
 
-    for floor, prog_areas in sorted(floor_data.items()):
+    import re
+    def _level_sort_key(name):
+        m = re.search(r'(\d+)', str(name))
+        return (int(m.group(1)) if m else 0, str(name))
+
+    for floor, prog_areas in sorted(floor_data.items(), key=lambda x: _level_sort_key(x[0])):
         s = floor_summary(floor, prog_areas, thresholds, default_threshold)
         writer.writerow({
             "Floor":               s["floor"],

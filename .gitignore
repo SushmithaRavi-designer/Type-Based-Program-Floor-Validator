@@ -3,6 +3,11 @@
 
 function_inputs.json
 
+# Google service account keys
+**/*.json.key
+*-b0-*.json
+symbolic-app-*.json
+
 **/.env
 **/.envrc
 

@@ -453,16 +453,6 @@ class FunctionInputs(AutomateBase):
         title="Report Detail Level",
         description="SUMMARY: Basic statistics only | DETAILED: Full analysis | VERBOSE: Include all metadata",
     )
-    google_apps_script_url: str = Field(
-        default="",
-        title="Google Apps Script Web App URL",
-        description=(
-            "Paste your deployed Apps Script Web App URL here. "
-            "Data will be POSTed directly and a live Google Sheets link returned. "
-            "Leave blank to skip (file attachment used instead)."
-        ),
-    )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Automate Function
@@ -679,10 +669,15 @@ def automate_function(
     debug_info.append(f"Objects with area > 0: {objs_with_area} / {len(element_metadata)}")
     debug_info.append(f"Total area sum: {total_area_sum:.2f} m²")
 
+    def _level_sort_key(name: str):
+        import re
+        m = re.search(r'(\d+)', str(name))
+        return (int(m.group(1)) if m else 0, str(name))
+
     for occupancy in sorted(floor_data_by_occupancy.keys()):
         occupancy_floor_data = floor_data_by_occupancy[occupancy]
 
-        for level, prog_areas in sorted(occupancy_floor_data.items()):
+        for level, prog_areas in sorted(occupancy_floor_data.items(), key=lambda x: _level_sort_key(x[0])):
             total     = sum(prog_areas.values())
             diversity = shannon_diversity(prog_areas)
             is_mono, dominant, dom_pct, allowed = mono_functional_check(
@@ -784,7 +779,7 @@ def automate_function(
 
     if function_inputs.report_level in (ReportLevel.DETAILED, ReportLevel.VERBOSE):
         summary_lines += ["", "── Level Summary ──"]
-        for level, prog_areas in sorted(floor_data.items()):
+        for level, prog_areas in sorted(floor_data.items(), key=lambda x: _level_sort_key(x[0])):
             total    = sum(prog_areas.values())
             dominant = max(prog_areas, key=prog_areas.get)
             pct      = prog_areas[dominant] / total * 100 if total else 0
@@ -834,9 +829,10 @@ def automate_function(
         else:
             coll_rows.append({"Occupancy": "No data", "Level": "", "Program": "", "Area": 0, "Status": ""})
 
-    # ── 11. Export — one Excel file per collection ────────────────────────────
+    # ── 11. Export — one Excel attachment + automatic Google Sheets ─────────
     sheet_urls = {}   # {coll_name: google_sheets_url}
-    gas_url = (function_inputs.google_apps_script_url or "").strip()
+    # GAS URL fallback: read from env var (no UI field needed)
+    gas_url = os.getenv("GOOGLE_APPS_SCRIPT_URL", "").strip()
 
     for coll_name, coll_rows in csv_rows_per_collection.items():
         safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in coll_name)
@@ -890,32 +886,45 @@ def automate_function(
         except Exception:
             pass
 
-        # POST to Google Apps Script per collection
-        if gas_url:
-            try:
-                sheet_title = f"Program_Floor_{safe_name}"
-                payload = json.dumps({
-                    "sheetTitle": sheet_title,
-                    "rows": coll_rows,
-                    "timingRows": build_timing_sheet_rows(),
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    gas_url,
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    response_body = resp.read().decode("utf-8")
-                    try:
-                        result = json.loads(response_body)
-                        url = result.get("sheetUrl", "")
-                    except Exception:
-                        url = response_body.strip() if response_body.startswith("http") else ""
-                    if url:
-                        sheet_urls[coll_name] = url
-            except Exception as ex:
-                sheet_urls[coll_name] = f"ERROR: {ex}"
+        # ── Google Sheets: try gspread (service account) then GAS URL fallback ──
+        try:
+            from sheets_writer import write_to_google_sheets
+            sheet_title = f"Program_Floor_{safe_name}"
+            url = write_to_google_sheets(
+                sheet_title,
+                coll_rows,
+                build_timing_sheet_rows(),
+            )
+            sheet_urls[coll_name] = url
+        except EnvironmentError:
+            # Credentials not set up — fall back to GAS URL if provided
+            if gas_url:
+                try:
+                    sheet_title = f"Program_Floor_{safe_name}"
+                    payload = json.dumps({
+                        "sheetTitle": sheet_title,
+                        "rows": coll_rows,
+                        "timingRows": build_timing_sheet_rows(),
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        gas_url,
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        response_body = resp.read().decode("utf-8")
+                        try:
+                            result = json.loads(response_body)
+                            url = result.get("sheetUrl", "")
+                        except Exception:
+                            url = response_body.strip() if response_body.startswith("http") else ""
+                        if url:
+                            sheet_urls[coll_name] = url
+                except Exception as ex:
+                    sheet_urls[coll_name] = f"ERROR: {ex}"
+        except Exception as ex:
+            sheet_urls[coll_name] = f"ERROR: {ex}"
 
     if issues:
         automate_context.set_context_view()
@@ -934,8 +943,10 @@ def automate_function(
     else:
         gs_section = (
             "📊 GOOGLE SHEETS:\n"
-            "  Add your Apps Script Web App URL in Function Settings\n"
-            "  to get direct clickable links next run.\n"
+            "  To enable automatic Google Sheets output, add these secrets in\n"
+            "  Speckle Automate → Function Variables:\n"
+            "    GOOGLE_CREDENTIALS_JSON  — your service account JSON\n"
+            "    GOOGLE_SHARE_EMAIL       — (optional) your Gmail to share the sheet\n"
         )
 
     success_msg = (
