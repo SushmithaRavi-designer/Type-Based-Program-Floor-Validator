@@ -30,6 +30,12 @@
       "default": "",
       "description": "Optional email to grant writer access to the created sheet.",
       "title": "Google Share Email"
+    },
+    "googleSpreadsheetId": {
+      "type": "string",
+      "default": "",
+      "description": "Optional existing spreadsheet ID. If provided, data is written there instead of creating a new file.",
+      "title": "Google Spreadsheet ID"
     }
   },
   "title": "FunctionInputs",

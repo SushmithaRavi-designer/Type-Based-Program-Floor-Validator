@@ -80,8 +80,12 @@ def _get_client():
     )
 
 
-def _get_or_create_spreadsheet(gc, title: str):
+def _get_or_create_spreadsheet(gc, title: str, spreadsheet_id: str | None = None):
     import gspread
+
+    if spreadsheet_id:
+        return gc.open_by_key(spreadsheet_id)
+
     try:
         return gc.open(title)
     except gspread.SpreadsheetNotFound:
@@ -153,7 +157,12 @@ def _write_dynamic_sheet(spreadsheet, sheet_name: str, rows: list, header_color:
     ws.freeze(rows=1)
 
 
-def write_to_google_sheets(sheet_title: str, rows: list, timing_rows: list) -> str:
+def write_to_google_sheets(
+    sheet_title: str,
+    rows: list,
+    timing_rows: list,
+    spreadsheet_id: str | None = None,
+) -> str:
     """
     Create or update a Google Spreadsheet with two sheets:
       Sheet 1 "Analysis"        — per occupancy/level/program data
@@ -162,7 +171,7 @@ def write_to_google_sheets(sheet_title: str, rows: list, timing_rows: list) -> s
     Raises EnvironmentError if credentials are not configured.
     """
     gc = _get_client()
-    spreadsheet = _get_or_create_spreadsheet(gc, sheet_title)
+    spreadsheet = _get_or_create_spreadsheet(gc, sheet_title, spreadsheet_id=spreadsheet_id)
 
     # Sheet 1 — Analysis
     _write_sheet(
@@ -204,10 +213,14 @@ def write_to_google_sheets(sheet_title: str, rows: list, timing_rows: list) -> s
     return spreadsheet.url
 
 
-def write_collection_areas_to_google_sheets(sheet_title: str, sheets: dict[str, list[dict]]) -> str:
+def write_collection_areas_to_google_sheets(
+    sheet_title: str,
+    sheets: dict[str, list[dict]],
+    spreadsheet_id: str | None = None,
+) -> str:
     """Create or update a spreadsheet with one worksheet per collection area table."""
     gc = _get_client()
-    spreadsheet = _get_or_create_spreadsheet(gc, sheet_title)
+    spreadsheet = _get_or_create_spreadsheet(gc, sheet_title, spreadsheet_id=spreadsheet_id)
 
     worksheet_order = []
     header_color = {"red": 0.180, "green": 0.490, "blue": 0.196}

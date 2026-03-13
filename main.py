@@ -7,7 +7,7 @@ from collections import defaultdict
 from enum import Enum
 from math import pi
 
-from pydantic import AliasChoices, ConfigDict, Field
+from pydantic import AliasChoices, ConfigDict, Field, SecretStr
 from speckle_automate import (
     AutomateBase,
     AutomationContext,
@@ -645,8 +645,8 @@ class FunctionInputs(AutomateBase):
         description="Select output destination: excel, google_sheets, or both",
     )
 
-    google_credentials_json: str = Field(
-        default="",
+    google_credentials_json: SecretStr = Field(
+        default=SecretStr(""),
         alias="googleCredentialsJson",
         validation_alias=AliasChoices("google_credentials_json", "googleCredentialsJson"),
         serialization_alias="googleCredentialsJson",
@@ -663,6 +663,15 @@ class FunctionInputs(AutomateBase):
         description="Optional email to grant writer access to the created sheet.",
     )
 
+    google_spreadsheet_id: str = Field(
+        default="",
+        alias="googleSpreadsheetId",
+        validation_alias=AliasChoices("google_spreadsheet_id", "googleSpreadsheetId"),
+        serialization_alias="googleSpreadsheetId",
+        title="Google Spreadsheet ID",
+        description="Optional existing spreadsheet ID. If provided, data is written there instead of creating a new file.",
+    )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Automate Function
 # ─────────────────────────────────────────────────────────────────────────────
@@ -672,8 +681,9 @@ def automate_function(
     function_inputs: FunctionInputs,
 ) -> None:
     # Fallback for Speckle setups where secret env vars are not exposed in UI.
-    if function_inputs.google_credentials_json and function_inputs.google_credentials_json.strip():
-        os.environ["GOOGLE_CREDENTIALS_JSON"] = function_inputs.google_credentials_json.strip()
+    credentials_json = function_inputs.google_credentials_json.get_secret_value().strip()
+    if credentials_json:
+        os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
     if function_inputs.google_share_email and function_inputs.google_share_email.strip():
         os.environ["GOOGLE_SHARE_EMAIL"] = function_inputs.google_share_email.strip()
 
@@ -730,12 +740,18 @@ def automate_function(
             spreadsheet_url = write_collection_areas_to_google_sheets(
                 "Collection_Area_Export",
                 sheet_rows,
+                spreadsheet_id=function_inputs.google_spreadsheet_id.strip() or None,
             )
             export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
         except Exception as ex:
+            msg = str(ex)
+            if "quota" in msg.lower() and "drive" in msg.lower():
+                msg += (
+                    " Use an existing sheet via googleSpreadsheetId and share it with the service account email."
+                )
             export_error = (
                 "ERROR with Google Sheets: "
-                f"{str(ex)}. "
+                f"{msg}. "
                 "Set outputFormat=google_sheets or both, and configure GOOGLE_CREDENTIALS_JSON "
                 "(or GOOGLE_CREDENTIALS_FILE) in your runtime environment."
             )
