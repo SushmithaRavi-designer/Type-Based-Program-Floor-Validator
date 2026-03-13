@@ -1,41 +1,13 @@
 {
   "$defs": {
-    "ColorExtractionMode": {
-      "description": "Material color extraction control.",
-      "enum": [
-        "enabled",
-        "disabled"
-      ],
-      "title": "ColorExtractionMode",
-      "type": "string"
-    },
     "OutputFormat": {
       "description": "Export output format selection.",
       "enum": [
         "excel",
-        "google_sheets"
+        "google_sheets",
+        "both"
       ],
       "title": "OutputFormat",
-      "type": "string"
-    },
-    "ReportLevel": {
-      "description": "Reporting detail level.",
-      "enum": [
-        "summary",
-        "detailed",
-        "verbose"
-      ],
-      "title": "ReportLevel",
-      "type": "string"
-    },
-    "ThresholdMode": {
-      "description": "Threshold validation mode.",
-      "enum": [
-        "strict",
-        "permissive",
-        "custom"
-      ],
-      "title": "ThresholdMode",
       "type": "string"
     }
   },
@@ -44,34 +16,8 @@
     "outputFormat": {
       "$ref": "#/$defs/OutputFormat",
       "default": "excel",
-      "description": "Select the output format for the analysis results",
+      "description": "Select output destination: excel, google_sheets, or both",
       "title": "Output Format"
-    },
-    "colorExtractionMode": {
-      "$ref": "#/$defs/ColorExtractionMode",
-      "default": "enabled",
-      "description": "Enable or disable material color extraction from Speckle objects",
-      "title": "Color Extraction Mode"
-    },
-    "thresholdMode": {
-      "$ref": "#/$defs/ThresholdMode",
-      "default": "custom",
-      "description": "STRICT: Apply thresholds strictly | PERMISSIVE: Allow higher tolerance | CUSTOM: Use defined threshold matrix",
-      "title": "Threshold Mode"
-    },
-    "defaultThreshold": {
-      "default": 70.0,
-      "description": "Fallback threshold used if a program is not defined in the matrix (0-100)",
-      "maximum": 100.0,
-      "minimum": 0.0,
-      "title": "Default Threshold (%)",
-      "type": "number"
-    },
-    "reportLevel": {
-      "$ref": "#/$defs/ReportLevel",
-      "default": "detailed",
-      "description": "SUMMARY: Basic statistics only | DETAILED: Full analysis with colors and levels | VERBOSE: Include all metadata and processing details",
-      "title": "Report Detail Level"
     }
   },
   "title": "FunctionInputs",

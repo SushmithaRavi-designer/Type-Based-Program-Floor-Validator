@@ -279,6 +279,7 @@ class ColorExtractionMode(str, Enum):
 class OutputFormat(str, Enum):
     EXCEL = "excel"
     GOOGLE_SHEETS = "google_sheets"
+    BOTH = "both"
 
 
 class ReportLevel(str, Enum):
@@ -507,6 +508,54 @@ def _extract_level_from_properties(obj) -> str:
     return "Unknown"
 
 
+def _parse_ratio_value(raw) -> float | None:
+    if raw is None:
+        return None
+
+    if isinstance(raw, (int, float)):
+        return round(float(raw), 2)
+
+    numeric = extract_numeric_value(str(raw))
+    if numeric is None:
+        return None
+
+    try:
+        return round(float(numeric), 2)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_occupancy_ratios_from_properties(obj) -> dict[str, float | None]:
+    properties = getattr(obj, "properties", None)
+
+    def _read(*keys):
+        if isinstance(properties, dict):
+            for key in keys:
+                if key in properties:
+                    return properties.get(key)
+        elif properties is not None:
+            for key in keys:
+                value = getattr(properties, key, None)
+                if value is not None:
+                    return value
+        return None
+
+    return {
+        "Morning Occupancy Ratio": _parse_ratio_value(_read(
+            "Morning Occupancy Ratio", "morningOccupancyRatio", "morning_occupancy_ratio"
+        )),
+        "Afternoon Occupancy Ratio": _parse_ratio_value(_read(
+            "Afternoon Occupancy Ratio", "afternoonOccupancyRatio", "afternoon_occupancy_ratio"
+        )),
+        "Evening Occupancy Ratio": _parse_ratio_value(_read(
+            "Evening Occupancy Ratio", "eveningOccupancyRatio", "evening_occupancy_ratio"
+        )),
+        "Night Occupancy Ratio": _parse_ratio_value(_read(
+            "Night Occupancy Ratio", "nightOccupancyRatio", "night_occupancy_ratio"
+        )),
+    }
+
+
 def _collection_sort_key(collection_name: str):
     normalized = _normalize_collection_name(collection_name)
     priority = {
@@ -553,20 +602,21 @@ def _build_collection_area_rows(collection_obj) -> list[dict]:
             continue
 
         level = _extract_level_from_properties(obj)
+        ratios = _extract_occupancy_ratios_from_properties(obj)
 
         row = {
             "Level": level,
             "Element Name": getattr(obj, "name", "") or "",
             "Properties Area": round(area, 2),
+            "Morning Occupancy Ratio": ratios["Morning Occupancy Ratio"] if ratios["Morning Occupancy Ratio"] is not None else "",
+            "Afternoon Occupancy Ratio": ratios["Afternoon Occupancy Ratio"] if ratios["Afternoon Occupancy Ratio"] is not None else "",
+            "Evening Occupancy Ratio": ratios["Evening Occupancy Ratio"] if ratios["Evening Occupancy Ratio"] is not None else "",
+            "Night Occupancy Ratio": ratios["Night Occupancy Ratio"] if ratios["Night Occupancy Ratio"] is not None else "",
         }
-
-        units = getattr(obj, "units", "") or ""
-        if units:
-            row["Units"] = units
 
         rows.append(row)
 
-    rows.sort(key=lambda row: (str(row.get("Element Name", "")), str(row.get("Element Id", ""))))
+    rows.sort(key=lambda row: (str(row.get("Element Name", "")), str(row.get("Level", ""))))
     return rows
 
 
@@ -578,29 +628,7 @@ class FunctionInputs(AutomateBase):
     output_format: OutputFormat = Field(
         default=OutputFormat.EXCEL,
         title="Output Format",
-        description="Select the output format for the analysis results",
-    )
-    color_extraction_mode: ColorExtractionMode = Field(
-        default=ColorExtractionMode.ENABLED,
-        title="Color Extraction Mode",
-        description="Enable or disable material color extraction from Speckle objects",
-    )
-    threshold_mode: ThresholdMode = Field(
-        default=ThresholdMode.CUSTOM,
-        title="Threshold Mode",
-        description="STRICT: Apply thresholds strictly | PERMISSIVE: Allow higher tolerance | CUSTOM: Use defined threshold matrix",
-    )
-    default_threshold: float = Field(
-        default=70.0,
-        title="Default Threshold (%)",
-        description="Fallback threshold used if a program is not defined in the matrix (0-100)",
-        ge=0.0,
-        le=100.0,
-    )
-    report_level: ReportLevel = Field(
-        default=ReportLevel.DETAILED,
-        title="Report Detail Level",
-        description="SUMMARY: Basic statistics only | DETAILED: Full analysis | VERBOSE: Include all metadata",
+        description="Select output destination: excel, google_sheets, or both",
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -616,6 +644,7 @@ def automate_function(
 
     sheet_rows = {}
     collection_counts = {}
+    collection_areas = {}
     total_area = 0.0
 
     for collection_name, collection_obj in collections.items():
@@ -626,7 +655,9 @@ def automate_function(
         sheet_name = _collection_sheet_name(collection_name, set(sheet_rows.keys()))
         sheet_rows[sheet_name] = rows
         collection_counts[sheet_name] = len(rows)
-        total_area += sum(row.get("Properties Area", 0) for row in rows)
+        sheet_area = sum(row.get("Properties Area", 0) for row in rows)
+        collection_areas[sheet_name] = sheet_area
+        total_area += sheet_area
 
     if not sheet_rows:
         automate_context.mark_run_failed(
@@ -638,31 +669,8 @@ def automate_function(
     export_summary = ""
     export_error = None
 
-    if function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
-        try:
-            from sheets_writer import write_collection_areas_to_google_sheets
-
-            spreadsheet_url = write_collection_areas_to_google_sheets(
-                "Collection_Area_Export",
-                sheet_rows,
-            )
-            export_summary = f"Google Sheets: {spreadsheet_url}"
-        except EnvironmentError:
-            try:
-                excel_path = rows_to_excel_multi_sheet(sheet_rows)
-                named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
-                try:
-                    os.rename(excel_path, named_path)
-                    excel_path = named_path
-                except Exception:
-                    pass
-                automate_context.store_file_result(excel_path)
-                export_summary = "Google Sheets credentials were not available, so an Excel workbook was attached instead."
-            except Exception as ex:
-                export_error = f"ERROR creating Excel: {str(ex)}"
-        except Exception as ex:
-            export_error = f"ERROR with Google Sheets: {str(ex)}"
-    else:
+    def _store_excel_export() -> None:
+        nonlocal export_summary, export_error
         try:
             excel_path = rows_to_excel_multi_sheet(sheet_rows)
             named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
@@ -672,9 +680,31 @@ def automate_function(
             except Exception:
                 pass
             automate_context.store_file_result(excel_path)
-            export_summary = "Excel workbook with multiple sheets attached."
+            export_summary += (" | " if export_summary else "") + "Excel workbook with multiple sheets attached."
         except Exception as ex:
             export_error = f"ERROR creating Excel: {str(ex)}"
+
+    def _store_google_sheets_export() -> None:
+        nonlocal export_summary, export_error
+        try:
+            from sheets_writer import write_collection_areas_to_google_sheets
+
+            spreadsheet_url = write_collection_areas_to_google_sheets(
+                "Collection_Area_Export",
+                sheet_rows,
+            )
+            export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
+        except Exception as ex:
+            export_error = f"ERROR with Google Sheets: {str(ex)}"
+
+    if function_inputs.output_format == OutputFormat.EXCEL:
+        _store_excel_export()
+    elif function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
+        _store_google_sheets_export()
+    else:
+        _store_excel_export()
+        if not export_error:
+            _store_google_sheets_export()
 
     if export_error:
         automate_context.mark_run_failed(export_error)
@@ -685,13 +715,49 @@ def automate_function(
         for sheet_name, row_count in collection_counts.items()
     ]
 
+    occ_keys = [
+        "MORNING OCCUPANCY",
+        "AFTERNOON OCCUPANCY",
+        "EVENING OCCUPANCY",
+        "NIGHT OCCUPANCY",
+    ]
+    occupancy_total_area = sum(collection_areas.get(name, 0.0) for name in occ_keys)
+
+    def _ratio_for(sheet_name: str) -> float:
+        if occupancy_total_area <= 0:
+            return 0.0
+        return round((collection_areas.get(sheet_name, 0.0) / occupancy_total_area) * 100, 2)
+
+    def _sheet_property_ratio(sheet_name: str, column_name: str) -> float | None:
+        for row in sheet_rows.get(sheet_name, []):
+            value = row.get(column_name)
+            if value in ("", None):
+                continue
+            parsed = _parse_ratio_value(value)
+            if parsed is not None:
+                return parsed
+        return None
+
+    morning_ratio = _sheet_property_ratio("MORNING OCCUPANCY", "Morning Occupancy Ratio")
+    afternoon_ratio = _sheet_property_ratio("AFTERNOON OCCUPANCY", "Afternoon Occupancy Ratio")
+    evening_ratio = _sheet_property_ratio("EVENING OCCUPANCY", "Evening Occupancy Ratio")
+    night_ratio = _sheet_property_ratio("NIGHT OCCUPANCY", "Night Occupancy Ratio")
+
+    occupancy_ratio_lines = [
+        f"Morning Occupancy Ratio: {morning_ratio if morning_ratio is not None else _ratio_for('MORNING OCCUPANCY')}%",
+        f"Afternoon Occupancy Ratio: {afternoon_ratio if afternoon_ratio is not None else _ratio_for('AFTERNOON OCCUPANCY')}%",
+        f"Evening Occupancy Ratio: {evening_ratio if evening_ratio is not None else _ratio_for('EVENING OCCUPANCY')}%",
+        f"Night Occupancy Ratio: {night_ratio if night_ratio is not None else _ratio_for('NIGHT OCCUPANCY')}%",
+    ]
+
     automate_context.mark_run_success(
         "Collection area export complete.\n"
         f"Sheets: {', '.join(sheet_rows.keys())}\n"
         f"Rows exported: {sum(collection_counts.values())}\n"
         f"Total properties area: {round(total_area, 2)} m²\n"
         f"{export_summary}\n"
-        f"Details: {'; '.join(sheet_descriptions)}"
+        f"Details: {'; '.join(sheet_descriptions)}\n"
+        f"{'; '.join(occupancy_ratio_lines)}"
     )
 
 
