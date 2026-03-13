@@ -15,6 +15,7 @@ import json
 import os
 import re
 import base64
+import ast
 from typing import Optional
 
 # Load .env relative to THIS file's directory (works locally and in Speckle Automate)
@@ -48,24 +49,51 @@ def _parse_credentials_json(raw_value: str) -> dict:
     if not raw:
         raise ValueError("empty credentials")
 
+    # Normalize common accidental wrapping/whitespace issues from web forms.
+    normalized = raw.strip().strip('"').strip("'")
+
     # 1) Normal JSON object
     try:
-        return json.loads(raw)
+        parsed = json.loads(normalized)
+        if isinstance(parsed, dict):
+            return parsed
+        if isinstance(parsed, str):
+            reparsed = json.loads(parsed)
+            if isinstance(reparsed, dict):
+                return reparsed
     except Exception:
         pass
 
     # 2) Double-encoded JSON string
     try:
-        decoded = json.loads(raw)
+        decoded = json.loads(normalized)
         if isinstance(decoded, str):
             return json.loads(decoded)
     except Exception:
         pass
 
-    # 3) Base64-encoded JSON string
+    # 3) Python-literal dict string fallback
     try:
-        padded = raw + "=" * ((4 - len(raw) % 4) % 4)
-        decoded_bytes = base64.b64decode(padded)
+        lit = ast.literal_eval(normalized)
+        if isinstance(lit, dict):
+            return lit
+        if isinstance(lit, str):
+            parsed = json.loads(lit)
+            if isinstance(parsed, dict):
+                return parsed
+    except Exception:
+        pass
+
+    # 4) Base64-encoded JSON string (standard and URL-safe)
+    try:
+        compact = re.sub(r"\s+", "", normalized)
+        # Some UIs transform '+' into spaces; recover from that.
+        compact = compact.replace(" ", "+")
+        padded = compact + "=" * ((4 - len(compact) % 4) % 4)
+        try:
+            decoded_bytes = base64.b64decode(padded)
+        except Exception:
+            decoded_bytes = base64.urlsafe_b64decode(padded)
         return json.loads(decoded_bytes.decode("utf-8"))
     except Exception as ex:
         raise ValueError(
