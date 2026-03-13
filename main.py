@@ -647,6 +647,22 @@ def automate_function(
             )
             export_summary = f"Google Sheets: {spreadsheet_url}"
         except EnvironmentError:
+            try:
+                excel_path = rows_to_excel_multi_sheet(sheet_rows)
+                named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
+                try:
+                    os.rename(excel_path, named_path)
+                    excel_path = named_path
+                except Exception:
+                    pass
+                automate_context.store_file_result(excel_path)
+                export_summary = "Google Sheets credentials were not available, so an Excel workbook was attached instead."
+            except Exception as ex:
+                export_summary = f"ERROR creating Excel: {str(ex)}"
+        except Exception as ex:
+            export_summary = f"ERROR with Google Sheets: {str(ex)}"
+    else:
+        try:
             excel_path = rows_to_excel_multi_sheet(sheet_rows)
             named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
             try:
@@ -654,26 +670,10 @@ def automate_function(
                 excel_path = named_path
             except Exception:
                 pass
-            try:
-                automate_context.store_file_result(excel_path)
-            finally:
-                if os.path.exists(excel_path):
-                    os.unlink(excel_path)
-            export_summary = "Google Sheets credentials were not available, so an Excel workbook was attached instead."
-    else:
-        excel_path = rows_to_excel_multi_sheet(sheet_rows)
-        named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
-        try:
-            os.rename(excel_path, named_path)
-            excel_path = named_path
-        except Exception:
-            pass
-        try:
             automate_context.store_file_result(excel_path)
-        finally:
-            if os.path.exists(excel_path):
-                os.unlink(excel_path)
-        export_summary = "Excel workbook attached."
+            export_summary = "Excel workbook with multiple sheets attached."
+        except Exception as ex:
+            export_summary = f"ERROR creating Excel: {str(ex)}"
 
     sheet_descriptions = [
         f"{sheet_name}: {row_count} area rows"

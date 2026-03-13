@@ -82,10 +82,15 @@ def rows_to_excel_multi_sheet(sheets_dict: dict, filename: str = None) -> str:
             wb.remove(wb.active)
         
         for sheet_name, rows in sheets_dict.items():
-            ws = wb.create_sheet(title=sheet_name)
+            # Sanitize sheet name (Excel has a 31-char limit)
+            safe_sheet_name = str(sheet_name)[:31]
+            ws = wb.create_sheet(title=safe_sheet_name)
             
             # Detect columns from first row, preserving order
-            fieldnames = list(rows[0].keys()) if rows else COLUMNS
+            if rows and isinstance(rows[0], dict):
+                fieldnames = list(rows[0].keys())
+            else:
+                fieldnames = COLUMNS
             
             # Write headers
             for col_idx, header in enumerate(fieldnames, 1):
