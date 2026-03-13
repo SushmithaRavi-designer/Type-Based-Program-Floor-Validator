@@ -490,6 +490,23 @@ def _extract_area_from_properties(obj) -> float:
     return 0.0
 
 
+def _extract_level_from_properties(obj) -> str:
+    properties = getattr(obj, "properties", None)
+
+    if isinstance(properties, dict):
+        for key in ("Level", "level"):
+            value = properties.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    elif properties is not None:
+        for key in ("Level", "level"):
+            value = getattr(properties, key, None)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+
+    return "Unknown"
+
+
 def _collection_sort_key(collection_name: str):
     normalized = _normalize_collection_name(collection_name)
     priority = {
@@ -535,10 +552,11 @@ def _build_collection_area_rows(collection_obj) -> list[dict]:
         if area <= 0:
             continue
 
+        level = _extract_level_from_properties(obj)
+
         row = {
-            "Element Id": getattr(obj, "id", "") or "",
+            "Level": level,
             "Element Name": getattr(obj, "name", "") or "",
-            "Speckle Type": speckle_type,
             "Properties Area": round(area, 2),
         }
 
@@ -617,20 +635,24 @@ def automate_function(
         )
         return
 
+    all_rows = []
+    for rows in sheet_rows.values():
+        all_rows.extend(rows)
+
     export_summary = ""
 
     if function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
         try:
-            from sheets_writer import write_collection_areas_to_google_sheets
+            from sheets_writer import write_area_export_to_google_sheets
 
-            spreadsheet_url = write_collection_areas_to_google_sheets(
-                "Collection_Area_Export",
-                sheet_rows,
+            spreadsheet_url = write_area_export_to_google_sheets(
+                "Area_Export",
+                all_rows,
             )
             export_summary = f"Google Sheets: {spreadsheet_url}"
         except EnvironmentError:
-            excel_path = rows_to_excel_multi_sheet(sheet_rows)
-            named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
+            excel_path = rows_to_excel(all_rows)
+            named_path = excel_path.replace(".xlsx", "_area_export.xlsx")
             try:
                 os.rename(excel_path, named_path)
                 excel_path = named_path
@@ -643,8 +665,8 @@ def automate_function(
                     os.unlink(excel_path)
             export_summary = "Google Sheets credentials were not available, so an Excel workbook was attached instead."
     else:
-        excel_path = rows_to_excel_multi_sheet(sheet_rows)
-        named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
+        excel_path = rows_to_excel(all_rows)
+        named_path = excel_path.replace(".xlsx", "_area_export.xlsx")
         try:
             os.rename(excel_path, named_path)
             excel_path = named_path
@@ -655,20 +677,16 @@ def automate_function(
         finally:
             if os.path.exists(excel_path):
                 os.unlink(excel_path)
-        export_summary = "Excel workbook attached."
+        export_summary = "Excel sheet attached."
 
-    sheet_descriptions = [
-        f"{sheet_name}: {row_count} area rows"
-        for sheet_name, row_count in collection_counts.items()
-    ]
+    collection_list = ', '.join(sheet_rows.keys())
 
     automate_context.mark_run_success(
         "Collection area export complete.\n"
-        f"Sheets: {', '.join(sheet_rows.keys())}\n"
-        f"Rows exported: {sum(collection_counts.values())}\n"
-        f"Total properties area: {round(total_area, 2)}\n"
-        f"{export_summary}\n"
-        f"Details: {'; '.join(sheet_descriptions)}"
+        f"Collections: {collection_list}\n"
+        f"Total rows exported: {len(all_rows)}\n"
+        f"Total properties area: {round(total_area, 2)} m²\n"
+        f"{export_summary}"
     )
 
 

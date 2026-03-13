@@ -176,6 +176,28 @@ def test_extract_area_from_properties_dict():
     assert _extract_area_from_properties(obj) == 5026.55
 
 
+def test_extract_level_from_properties_dict():
+    from main import _extract_level_from_properties
+
+    class Dummy:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    obj = Dummy(properties={"Level": "L03"})
+    assert _extract_level_from_properties(obj) == "L03"
+
+
+def test_extract_level_from_properties_fallback_unknown():
+    from main import _extract_level_from_properties
+
+    class Dummy:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    obj = Dummy(properties={"Area": 10.0})
+    assert _extract_level_from_properties(obj) == "Unknown"
+
+
 if __name__ == "__main__":
     # Quick smoke-run without pytest
     tests = [
@@ -189,6 +211,8 @@ if __name__ == "__main__":
         test_full_floor_summary,
         test_collection_sheet_name_mapping,
         test_extract_area_from_properties_dict,
+        test_extract_level_from_properties_dict,
+        test_extract_level_from_properties_fallback_unknown,
     ]
     passed = 0
     for t in tests:
