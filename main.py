@@ -759,6 +759,15 @@ def automate_function(
                 spreadsheet_id=spreadsheet_id,
             )
             export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
+
+            # Attach a tiny text artifact with the full URL for easy access in UI.
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", suffix="_google_sheet_link.txt", delete=False, encoding="utf-8") as temp_file:
+                    temp_file.write(spreadsheet_url)
+                    link_path = temp_file.name
+                automate_context.store_file_result(link_path)
+            except Exception as artifact_ex:
+                export_warnings.append(f"Google Sheets link artifact failed: {str(artifact_ex)}")
         except Exception as ex:
             msg = str(ex)
             if "quota" in msg.lower() and "drive" in msg.lower():
