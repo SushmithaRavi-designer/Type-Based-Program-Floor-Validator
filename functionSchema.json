@@ -18,6 +18,18 @@
       "default": "excel",
       "description": "Select output destination: excel, google_sheets, or both",
       "title": "Output Format"
+    },
+    "googleCredentialsJson": {
+      "type": "string",
+      "default": "",
+      "description": "Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
+      "title": "Google Credentials JSON"
+    },
+    "googleShareEmail": {
+      "type": "string",
+      "default": "",
+      "description": "Optional email to grant writer access to the created sheet.",
+      "title": "Google Share Email"
     }
   },
   "title": "FunctionInputs",
