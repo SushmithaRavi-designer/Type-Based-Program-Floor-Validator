@@ -645,8 +645,8 @@ class FunctionInputs(AutomateBase):
         description="Select output destination: excel, google_sheets, or both",
     )
 
-    google_credentials_json: str | None = Field(
-        default=None,
+    google_credentials_json: str = Field(
+        default="",
         alias="googleCredentialsJson",
         validation_alias=AliasChoices("google_credentials_json", "googleCredentialsJson"),
         serialization_alias="googleCredentialsJson",
@@ -654,8 +654,8 @@ class FunctionInputs(AutomateBase):
         description="Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
     )
 
-    google_share_email: str | None = Field(
-        default=None,
+    google_share_email: str = Field(
+        default="",
         alias="googleShareEmail",
         validation_alias=AliasChoices("google_share_email", "googleShareEmail"),
         serialization_alias="googleShareEmail",
