@@ -688,12 +688,16 @@ def automate_function(
     function_inputs: FunctionInputs,
 ) -> None:
     # Fallback for Speckle setups where secret env vars are not exposed in UI.
-    credentials_json = function_inputs.googleCredentialsJson.get_secret_value().strip()
-    if credentials_json:
-        os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
     credentials_b64 = function_inputs.googleCredentialsJsonBase64.strip()
+    credentials_json = function_inputs.googleCredentialsJson.get_secret_value().strip()
+
+    # Prefer base64 credentials when present to avoid UI escaping issues.
     if credentials_b64:
         os.environ["GOOGLE_CREDENTIALS_JSON_BASE64"] = credentials_b64
+        os.environ.pop("GOOGLE_CREDENTIALS_JSON", None)
+    elif credentials_json:
+        os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
+        os.environ.pop("GOOGLE_CREDENTIALS_JSON_BASE64", None)
     if function_inputs.google_share_email and function_inputs.google_share_email.strip():
         os.environ["GOOGLE_SHARE_EMAIL"] = function_inputs.google_share_email.strip()
 
