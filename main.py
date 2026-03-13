@@ -688,16 +688,12 @@ def automate_function(
     function_inputs: FunctionInputs,
 ) -> None:
     # Fallback for Speckle setups where secret env vars are not exposed in UI.
-    credentials_b64 = function_inputs.googleCredentialsJsonBase64.strip()
     credentials_json = function_inputs.googleCredentialsJson.get_secret_value().strip()
-
-    # Prefer base64 credentials when present to avoid UI escaping issues.
+    if credentials_json:
+        os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
+    credentials_b64 = function_inputs.googleCredentialsJsonBase64.strip()
     if credentials_b64:
         os.environ["GOOGLE_CREDENTIALS_JSON_BASE64"] = credentials_b64
-        os.environ.pop("GOOGLE_CREDENTIALS_JSON", None)
-    elif credentials_json:
-        os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
-        os.environ.pop("GOOGLE_CREDENTIALS_JSON_BASE64", None)
     if function_inputs.google_share_email and function_inputs.google_share_email.strip():
         os.environ["GOOGLE_SHARE_EMAIL"] = function_inputs.google_share_email.strip()
 
@@ -764,14 +760,15 @@ def automate_function(
             )
             export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
 
-            # Attach a tiny text artifact with the full URL for easy access in UI.
+            # Add a clickable shortcut artifact for easier access from attachments.
             try:
-                with tempfile.NamedTemporaryFile(mode="w", suffix="_google_sheet_link.txt", delete=False, encoding="utf-8") as temp_file:
-                    temp_file.write(spreadsheet_url)
-                    link_path = temp_file.name
-                automate_context.store_file_result(link_path)
+                with tempfile.NamedTemporaryFile(mode="w", suffix="_google_sheet.url", delete=False, encoding="utf-8") as shortcut_file:
+                    shortcut_file.write("[InternetShortcut]\n")
+                    shortcut_file.write(f"URL={spreadsheet_url}\n")
+                    shortcut_path = shortcut_file.name
+                automate_context.store_file_result(shortcut_path)
             except Exception as artifact_ex:
-                export_warnings.append(f"Google Sheets link artifact failed: {str(artifact_ex)}")
+                export_warnings.append(f"Google Sheets shortcut attachment failed: {str(artifact_ex)}")
         except Exception as ex:
             msg = str(ex)
             if "quota" in msg.lower() and "drive" in msg.lower():
