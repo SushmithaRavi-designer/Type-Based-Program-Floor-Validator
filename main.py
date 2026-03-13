@@ -697,6 +697,12 @@ def automate_function(
     if function_inputs.google_share_email and function_inputs.google_share_email.strip():
         os.environ["GOOGLE_SHARE_EMAIL"] = function_inputs.google_share_email.strip()
 
+    spreadsheet_id = (
+        function_inputs.google_spreadsheet_id.strip()
+        or os.getenv("GOOGLE_SPREADSHEET_ID", "").strip()
+        or None
+    )
+
     version_root_object = automate_context.receive_version()
     collections = _get_area_export_collections(version_root_object)
 
@@ -750,7 +756,7 @@ def automate_function(
             spreadsheet_url = write_collection_areas_to_google_sheets(
                 "Collection_Area_Export",
                 sheet_rows,
-                spreadsheet_id=function_inputs.google_spreadsheet_id.strip() or None,
+                spreadsheet_id=spreadsheet_id,
             )
             export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
         except Exception as ex:
