@@ -137,10 +137,29 @@ def _get_client():
             continue
         try:
             creds_dict = _parse_credentials_json(raw)
-            creds      = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
+        except ValueError as ex:
+            last_error = Exception(f"{env_name} parse error: {ex}")
+            continue
+
+        # JSON parsed OK — now try to build credentials and authorise
+        try:
+            creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
+        except Exception as ex:
+            last_error = Exception(
+                f"{env_name}: credentials JSON was parsed successfully "
+                f"(client_email={creds_dict.get('client_email','?')}) "
+                f"but Credentials.from_service_account_info failed: {ex}"
+            )
+            continue
+
+        try:
             return gspread.authorize(creds)
         except Exception as ex:
-            last_error = Exception(f"{env_name}: {ex}")
+            last_error = Exception(
+                f"{env_name}: authorisation failed for "
+                f"{creds_dict.get('client_email','?')}: {ex}"
+            )
+            continue
 
     if last_error:
         raise last_error
@@ -276,8 +295,15 @@ def write_collection_areas_to_google_sheets(
         or None
     )
 
-    gc          = _get_client()
-    spreadsheet = _get_or_create_spreadsheet(gc, sheet_title, spreadsheet_id=resolved_id)
+    try:
+        gc = _get_client()
+    except Exception as ex:
+        raise RuntimeError(f"Google Sheets auth failed: {ex}") from ex
+
+    try:
+        spreadsheet = _get_or_create_spreadsheet(gc, sheet_title, spreadsheet_id=resolved_id)
+    except Exception as ex:
+        raise RuntimeError(f"Could not open/create spreadsheet: {ex}") from ex
 
     header_color     = {"red": 0.180, "green": 0.490, "blue": 0.196}  # dark green
     worksheet_order  = []
