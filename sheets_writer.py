@@ -131,10 +131,20 @@ def _get_client():
     # 3. Try raw JSON string (Speckle Automate function variable)
     creds_raw = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
     creds_b64 = os.getenv("GOOGLE_CREDENTIALS_JSON_BASE64", "").strip()
-    if creds_raw or creds_b64:
-        creds_dict = _parse_credentials_json(creds_raw or creds_b64)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
-        return gspread.authorize(creds)
+    parse_errors = []
+
+    for candidate in [creds_raw, creds_b64]:
+        if not candidate:
+            continue
+        try:
+            creds_dict = _parse_credentials_json(candidate)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
+            return gspread.authorize(creds)
+        except Exception as ex:
+            parse_errors.append(str(ex))
+
+    if parse_errors:
+        raise ValueError("Invalid Google credentials format. Paste valid JSON or use base64-encoded JSON.")
 
     raise EnvironmentError(
         "No Google credentials found. Place google_credentials.json in the project root, "
