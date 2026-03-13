@@ -824,10 +824,17 @@ def automate_function(
     ]
 
     warning_text = f"\nWarnings: {' | '.join(export_warnings)}" if export_warnings else ""
+    if google_sheets_url:
+        google_link_text = (
+            f"Google Sheets URL: <{google_sheets_url}>\n"
+            f"Google Sheets: [Open Sheet]({google_sheets_url})\n"
+        )
+    else:
+        google_link_text = "Google Sheets URL: N/A\n"
 
     automate_context.mark_run_success(
         "Collection area export complete.\n"
-        f"Google Sheets URL: {google_sheets_url if google_sheets_url else 'N/A'}\n"
+        f"{google_link_text}"
         f"Sheets: {', '.join(sheet_rows.keys())}\n"
         f"Rows exported: {sum(collection_counts.values())}\n"
         f"Total properties area: {round(total_area, 2)} m²\n"
