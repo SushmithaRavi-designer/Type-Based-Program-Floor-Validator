@@ -25,12 +25,6 @@
       "description": "Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
       "title": "Google Credentials JSON"
     },
-    "googleCredentialsJsonBase64": {
-      "type": "string",
-      "default": "",
-      "description": "Safer alternative to avoid JSON paste/escaping issues. Paste base64-encoded service-account JSON.",
-      "title": "Google Credentials JSON (Base64)"
-    },
     "googleShareEmail": {
       "type": "string",
       "default": "",

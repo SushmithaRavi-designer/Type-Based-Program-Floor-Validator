@@ -653,14 +653,6 @@ class FunctionInputs(AutomateBase):
         description="Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
     )
 
-    googleCredentialsJsonBase64: str = Field(
-        default="",
-        validation_alias=AliasChoices("googleCredentialsJsonBase64", "google_credentials_json_base64"),
-        serialization_alias="googleCredentialsJsonBase64",
-        title="Google Credentials JSON (Base64)",
-        description="Safer alternative to avoid JSON paste/escaping issues. Paste base64-encoded service-account JSON.",
-    )
-
     google_share_email: str = Field(
         default="",
         alias="googleShareEmail",
@@ -691,9 +683,6 @@ def automate_function(
     credentials_json = function_inputs.googleCredentialsJson.get_secret_value().strip()
     if credentials_json:
         os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
-    credentials_b64 = function_inputs.googleCredentialsJsonBase64.strip()
-    if credentials_b64:
-        os.environ["GOOGLE_CREDENTIALS_JSON_BASE64"] = credentials_b64
     if function_inputs.google_share_email and function_inputs.google_share_email.strip():
         os.environ["GOOGLE_SHARE_EMAIL"] = function_inputs.google_share_email.strip()
 
@@ -731,6 +720,7 @@ def automate_function(
         return
 
     export_summary = ""
+    google_sheets_url = ""
     export_warnings = []
 
     def _store_excel_export() -> None:
@@ -749,7 +739,7 @@ def automate_function(
             export_warnings.append(f"Excel export failed: {str(ex)}")
 
     def _store_google_sheets_export() -> None:
-        nonlocal export_summary, export_warnings
+        nonlocal export_summary, export_warnings, google_sheets_url
         try:
             from sheets_writer import write_collection_areas_to_google_sheets
 
@@ -758,17 +748,8 @@ def automate_function(
                 sheet_rows,
                 spreadsheet_id=spreadsheet_id,
             )
+            google_sheets_url = spreadsheet_url
             export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
-
-            # Add a clickable shortcut artifact for easier access from attachments.
-            try:
-                with tempfile.NamedTemporaryFile(mode="w", suffix="_google_sheet.url", delete=False, encoding="utf-8") as shortcut_file:
-                    shortcut_file.write("[InternetShortcut]\n")
-                    shortcut_file.write(f"URL={spreadsheet_url}\n")
-                    shortcut_path = shortcut_file.name
-                automate_context.store_file_result(shortcut_path)
-            except Exception as artifact_ex:
-                export_warnings.append(f"Google Sheets shortcut attachment failed: {str(artifact_ex)}")
         except Exception as ex:
             msg = str(ex)
             if "quota" in msg.lower() and "drive" in msg.lower():
@@ -846,6 +827,7 @@ def automate_function(
 
     automate_context.mark_run_success(
         "Collection area export complete.\n"
+        f"Google Sheets URL: {google_sheets_url if google_sheets_url else 'N/A'}\n"
         f"Sheets: {', '.join(sheet_rows.keys())}\n"
         f"Rows exported: {sum(collection_counts.values())}\n"
         f"Total properties area: {round(total_area, 2)} m²\n"
