@@ -125,6 +125,34 @@ def _write_sheet(spreadsheet, sheet_name: str, columns: list, rows: list, header
     ws.freeze(rows=1)
 
 
+def _write_dynamic_sheet(spreadsheet, sheet_name: str, rows: list, header_color: dict):
+    """Write arbitrary rows to a named worksheet using the row dict keys as columns."""
+    import gspread
+
+    try:
+        ws = spreadsheet.worksheet(sheet_name)
+        ws.clear()
+    except gspread.WorksheetNotFound:
+        column_count = max(len(rows[0].keys()) if rows else 1, 1) + 2
+        ws = spreadsheet.add_worksheet(title=sheet_name, rows=max(len(rows) + 10, 100), cols=column_count)
+
+    if not rows:
+        ws.update("A1", [["No data."]])
+        return
+
+    columns = list(rows[0].keys())
+    values = [columns] + [[row.get(column, "") for column in columns] for row in rows]
+    ws.update("A1", values)
+    ws.format(
+        f"A1:{chr(64 + len(columns))}1",
+        {
+            "backgroundColor": header_color,
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+        },
+    )
+    ws.freeze(rows=1)
+
+
 def write_to_google_sheets(sheet_title: str, rows: list, timing_rows: list) -> str:
     """
     Create or update a Google Spreadsheet with two sheets:
@@ -168,6 +196,39 @@ def write_to_google_sheets(sheet_title: str, rows: list, timing_rows: list) -> s
             pass
 
     # Make the sheet publicly viewable by anyone with the link
+    try:
+        spreadsheet.share("", perm_type="anyone", role="reader")
+    except Exception:
+        pass
+
+    return spreadsheet.url
+
+
+def write_collection_areas_to_google_sheets(sheet_title: str, sheets: dict[str, list[dict]]) -> str:
+    """Create or update a spreadsheet with one worksheet per collection area table."""
+    gc = _get_client()
+    spreadsheet = _get_or_create_spreadsheet(gc, sheet_title)
+
+    worksheet_order = []
+    header_color = {"red": 0.180, "green": 0.490, "blue": 0.196}
+
+    for sheet_name, rows in sheets.items():
+        _write_dynamic_sheet(spreadsheet, sheet_name, rows, header_color)
+        worksheet_order.append(spreadsheet.worksheet(sheet_name))
+
+    if worksheet_order:
+        try:
+            spreadsheet.reorder_worksheets(worksheet_order)
+        except Exception:
+            pass
+
+    share_email = os.getenv("GOOGLE_SHARE_EMAIL", "").strip()
+    if share_email:
+        try:
+            spreadsheet.share(share_email, perm_type="user", role="writer", notify=False)
+        except Exception:
+            pass
+
     try:
         spreadsheet.share("", perm_type="anyone", role="reader")
     except Exception:

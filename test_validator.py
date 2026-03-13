@@ -157,6 +157,25 @@ def test_parse_thresholds_compatibility():
     assert _parse_thresholds({"program_threshold_matrix": "not json"}) == {}
 
 
+def test_collection_sheet_name_mapping():
+    from main import _collection_sheet_name
+
+    assert _collection_sheet_name("PROGRAM BLOCKS") == "PROGRAM BLOCK"
+    assert _collection_sheet_name("morning") == "MORNING OCCUPANCY"
+    assert _collection_sheet_name("AFTERNOON") == "AFTERNOON OCCUPANCY"
+
+
+def test_extract_area_from_properties_dict():
+    from main import _extract_area_from_properties
+
+    class Dummy:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    obj = Dummy(properties={"Area": 5026.548254743663})
+    assert _extract_area_from_properties(obj) == 5026.55
+
+
 if __name__ == "__main__":
     # Quick smoke-run without pytest
     tests = [
@@ -168,6 +187,8 @@ if __name__ == "__main__":
         test_vertical_stacking,
         test_csv_columns, test_csv_values,
         test_full_floor_summary,
+        test_collection_sheet_name_mapping,
+        test_extract_area_from_properties_dict,
     ]
     passed = 0
     for t in tests:
