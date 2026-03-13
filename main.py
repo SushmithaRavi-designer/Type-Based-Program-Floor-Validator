@@ -750,24 +750,6 @@ def automate_function(
             )
             google_sheets_url = spreadsheet_url
             export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
-
-            # Add an HTML link artifact to attachments for easy clickable access.
-            try:
-                html_content = (
-                    "<!doctype html>"
-                    "<html><head><meta charset='utf-8'><title>Google Sheet Link</title></head>"
-                    "<body style='font-family: Arial, sans-serif; padding: 16px;'>"
-                    "<h3>Google Sheet</h3>"
-                    f"<p><a href='{spreadsheet_url}' target='_blank' rel='noopener noreferrer'>Open Google Sheet</a></p>"
-                    f"<p style='word-break: break-all;'>{spreadsheet_url}</p>"
-                    "</body></html>"
-                )
-                with tempfile.NamedTemporaryFile(mode="w", suffix="_google_sheet_link.html", delete=False, encoding="utf-8") as link_file:
-                    link_file.write(html_content)
-                    link_path = link_file.name
-                automate_context.store_file_result(link_path)
-            except Exception as artifact_ex:
-                export_warnings.append(f"Google Sheets link attachment failed: {str(artifact_ex)}")
         except Exception as ex:
             msg = str(ex)
             if "quota" in msg.lower() and "drive" in msg.lower():
