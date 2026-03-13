@@ -144,35 +144,11 @@ def rows_to_excel_multi_sheet(sheets_dict: dict, filename: str = None) -> str:
         wb.save(filename)
         return filename
     
-    except ImportError:
-        # If openpyxl not available, create first sheet as CSV
-        if sheets_dict:
-            first_sheet_name = list(sheets_dict.keys())[0]
-            rows = sheets_dict[first_sheet_name]
-            buf = io.StringIO()
-            fieldnames = list(rows[0].keys()) if rows else COLUMNS
-            writer = csv.DictWriter(
-                buf, 
-                fieldnames=fieldnames, 
-                extrasaction="ignore",
-                quoting=csv.QUOTE_MINIMAL,
-                lineterminator='\r\n'
-            )
-            writer.writeheader()
-            writer.writerows(rows)
-            
-            if filename is None:
-                tmp_file = tempfile.NamedTemporaryFile(
-                    suffix=".csv",
-                    delete=False,
-                    prefix="program_floor_validation_"
-                )
-                filename = tmp_file.name
-                tmp_file.close()
-            
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(buf.getvalue())
-            return filename
+    except ImportError as ex:
+        raise RuntimeError(
+            "Multi-sheet Excel export requires 'openpyxl'. "
+            "Install dependencies from pyproject.toml/requirements.txt before running."
+        ) from ex
 
 
 def rows_to_excel(rows: List[Dict], filename: str = None) -> str:

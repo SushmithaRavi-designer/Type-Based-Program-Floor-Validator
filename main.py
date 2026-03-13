@@ -636,6 +636,7 @@ def automate_function(
         return
 
     export_summary = ""
+    export_error = None
 
     if function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
         try:
@@ -658,9 +659,9 @@ def automate_function(
                 automate_context.store_file_result(excel_path)
                 export_summary = "Google Sheets credentials were not available, so an Excel workbook was attached instead."
             except Exception as ex:
-                export_summary = f"ERROR creating Excel: {str(ex)}"
+                export_error = f"ERROR creating Excel: {str(ex)}"
         except Exception as ex:
-            export_summary = f"ERROR with Google Sheets: {str(ex)}"
+            export_error = f"ERROR with Google Sheets: {str(ex)}"
     else:
         try:
             excel_path = rows_to_excel_multi_sheet(sheet_rows)
@@ -673,7 +674,11 @@ def automate_function(
             automate_context.store_file_result(excel_path)
             export_summary = "Excel workbook with multiple sheets attached."
         except Exception as ex:
-            export_summary = f"ERROR creating Excel: {str(ex)}"
+            export_error = f"ERROR creating Excel: {str(ex)}"
+
+    if export_error:
+        automate_context.mark_run_failed(export_error)
+        return
 
     sheet_descriptions = [
         f"{sheet_name}: {row_count} area rows"
