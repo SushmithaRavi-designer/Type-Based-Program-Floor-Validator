@@ -7,7 +7,7 @@ from collections import defaultdict
 from enum import Enum
 from math import pi
 
-from pydantic import Field
+from pydantic import AliasChoices, ConfigDict, Field
 from speckle_automate import (
     AutomateBase,
     AutomationContext,
@@ -634,8 +634,13 @@ def _build_collection_area_rows(collection_obj) -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class FunctionInputs(AutomateBase):
+    model_config = ConfigDict(populate_by_name=True)
+
     output_format: OutputFormat = Field(
         default=OutputFormat.EXCEL,
+        alias="outputFormat",
+        validation_alias=AliasChoices("output_format", "outputFormat"),
+        serialization_alias="outputFormat",
         title="Output Format",
         description="Select output destination: excel, google_sheets, or both",
     )
@@ -704,7 +709,12 @@ def automate_function(
             )
             export_summary += (" | " if export_summary else "") + f"Google Sheets: {spreadsheet_url}"
         except Exception as ex:
-            export_error = f"ERROR with Google Sheets: {str(ex)}"
+            export_error = (
+                "ERROR with Google Sheets: "
+                f"{str(ex)}. "
+                "Set outputFormat=google_sheets or both, and configure GOOGLE_CREDENTIALS_JSON "
+                "(or GOOGLE_CREDENTIALS_FILE) in your runtime environment."
+            )
 
     if function_inputs.output_format == OutputFormat.EXCEL:
         _store_excel_export()

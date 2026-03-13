@@ -1,8 +1,7 @@
 {
   "speckleToken": "YOUR SPEKCLE TOKEN",
   "functionInputs": {
-    "whisperMessage": "you are doing something weird",
-    "forbiddenSpeckleType": "wall"
+    "outputFormat": "google_sheets"
   },
   "automationRunData": {
     "project_id": "project id",
