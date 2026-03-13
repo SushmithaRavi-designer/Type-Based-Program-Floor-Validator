@@ -645,10 +645,9 @@ class FunctionInputs(AutomateBase):
         description="Select output destination: excel, google_sheets, or both",
     )
 
-    google_credentials_json: SecretStr = Field(
+    googleCredentialsJson: SecretStr = Field(
         default=SecretStr(""),
-        alias="googleCredentialsJson",
-        validation_alias=AliasChoices("google_credentials_json", "googleCredentialsJson"),
+        validation_alias=AliasChoices("googleCredentialsJson", "google_credentials_json"),
         serialization_alias="googleCredentialsJson",
         title="Google Credentials JSON",
         description="Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
@@ -681,7 +680,7 @@ def automate_function(
     function_inputs: FunctionInputs,
 ) -> None:
     # Fallback for Speckle setups where secret env vars are not exposed in UI.
-    credentials_json = function_inputs.google_credentials_json.get_secret_value().strip()
+    credentials_json = function_inputs.googleCredentialsJson.get_secret_value().strip()
     if credentials_json:
         os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
     if function_inputs.google_share_email and function_inputs.google_share_email.strip():
@@ -748,6 +747,11 @@ def automate_function(
             if "quota" in msg.lower() and "drive" in msg.lower():
                 msg += (
                     " Use an existing sheet via googleSpreadsheetId and share it with the service account email."
+                )
+            if "404" in msg:
+                msg += (
+                    " Verify googleSpreadsheetId (or paste full sheet URL) and ensure the sheet is shared with "
+                    "the service account as Editor."
                 )
             export_error = (
                 "ERROR with Google Sheets: "

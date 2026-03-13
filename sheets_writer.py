@@ -13,6 +13,7 @@ No URL needs to be pasted per run.
 
 import json
 import os
+import re
 from typing import Optional
 
 # Load .env relative to THIS file's directory (works locally and in Speckle Automate)
@@ -80,11 +81,34 @@ def _get_client():
     )
 
 
+def _normalize_spreadsheet_id(spreadsheet_id: str | None) -> str | None:
+    if not spreadsheet_id:
+        return None
+
+    raw = spreadsheet_id.strip()
+    if not raw:
+        return None
+
+    # Accept a full Google Sheets URL and extract the key.
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", raw)
+    if match:
+        return match.group(1)
+
+    return raw
+
+
 def _get_or_create_spreadsheet(gc, title: str, spreadsheet_id: str | None = None):
     import gspread
 
-    if spreadsheet_id:
-        return gc.open_by_key(spreadsheet_id)
+    normalized_id = _normalize_spreadsheet_id(spreadsheet_id)
+    if normalized_id:
+        try:
+            return gc.open_by_key(normalized_id)
+        except Exception as ex:
+            raise ValueError(
+                "Spreadsheet not found (404). Use a valid Google Spreadsheet ID or URL, and share the sheet "
+                "with the service-account email as Editor."
+            ) from ex
 
     try:
         return gc.open(title)
