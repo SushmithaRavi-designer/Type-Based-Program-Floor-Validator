@@ -592,6 +592,15 @@ def _get_area_export_collections(root_object) -> dict:
 def _build_collection_area_rows(collection_obj) -> list[dict]:
     rows = []
 
+    def _level_sort_key(level_value: str):
+        import re
+
+        level_text = str(level_value or "").strip()
+        match = re.search(r"(\d+)", level_text)
+        if match:
+            return (0, int(match.group(1)), level_text)
+        return (1, 0, level_text)
+
     for obj in flatten_base(collection_obj):
         speckle_type = str(getattr(obj, "speckle_type", ""))
         if "Collection" in speckle_type:
@@ -616,7 +625,7 @@ def _build_collection_area_rows(collection_obj) -> list[dict]:
 
         rows.append(row)
 
-    rows.sort(key=lambda row: (str(row.get("Element Name", "")), str(row.get("Level", ""))))
+    rows.sort(key=lambda row: (_level_sort_key(row.get("Level", "")), str(row.get("Element Name", ""))))
     return rows
 
 
