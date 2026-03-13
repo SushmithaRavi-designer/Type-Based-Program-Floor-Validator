@@ -635,24 +635,20 @@ def automate_function(
         )
         return
 
-    all_rows = []
-    for rows in sheet_rows.values():
-        all_rows.extend(rows)
-
     export_summary = ""
 
     if function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
         try:
-            from sheets_writer import write_area_export_to_google_sheets
+            from sheets_writer import write_collection_areas_to_google_sheets
 
-            spreadsheet_url = write_area_export_to_google_sheets(
-                "Area_Export",
-                all_rows,
+            spreadsheet_url = write_collection_areas_to_google_sheets(
+                "Collection_Area_Export",
+                sheet_rows,
             )
             export_summary = f"Google Sheets: {spreadsheet_url}"
         except EnvironmentError:
-            excel_path = rows_to_excel(all_rows)
-            named_path = excel_path.replace(".xlsx", "_area_export.xlsx")
+            excel_path = rows_to_excel_multi_sheet(sheet_rows)
+            named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
             try:
                 os.rename(excel_path, named_path)
                 excel_path = named_path
@@ -665,8 +661,8 @@ def automate_function(
                     os.unlink(excel_path)
             export_summary = "Google Sheets credentials were not available, so an Excel workbook was attached instead."
     else:
-        excel_path = rows_to_excel(all_rows)
-        named_path = excel_path.replace(".xlsx", "_area_export.xlsx")
+        excel_path = rows_to_excel_multi_sheet(sheet_rows)
+        named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
         try:
             os.rename(excel_path, named_path)
             excel_path = named_path
@@ -677,16 +673,20 @@ def automate_function(
         finally:
             if os.path.exists(excel_path):
                 os.unlink(excel_path)
-        export_summary = "Excel sheet attached."
+        export_summary = "Excel workbook attached."
 
-    collection_list = ', '.join(sheet_rows.keys())
+    sheet_descriptions = [
+        f"{sheet_name}: {row_count} area rows"
+        for sheet_name, row_count in collection_counts.items()
+    ]
 
     automate_context.mark_run_success(
         "Collection area export complete.\n"
-        f"Collections: {collection_list}\n"
-        f"Total rows exported: {len(all_rows)}\n"
+        f"Sheets: {', '.join(sheet_rows.keys())}\n"
+        f"Rows exported: {sum(collection_counts.values())}\n"
         f"Total properties area: {round(total_area, 2)} m²\n"
-        f"{export_summary}"
+        f"{export_summary}\n"
+        f"Details: {'; '.join(sheet_descriptions)}"
     )
 
 

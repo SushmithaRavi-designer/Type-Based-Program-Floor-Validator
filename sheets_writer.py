@@ -235,26 +235,3 @@ def write_collection_areas_to_google_sheets(sheet_title: str, sheets: dict[str, 
         pass
 
     return spreadsheet.url
-
-
-def write_area_export_to_google_sheets(sheet_title: str, rows: list[dict]) -> str:
-    """Create or update a spreadsheet with all area export data in a single sheet."""
-    gc = _get_client()
-    spreadsheet = _get_or_create_spreadsheet(gc, sheet_title)
-
-    header_color = {"red": 0.180, "green": 0.490, "blue": 0.196}
-    _write_dynamic_sheet(spreadsheet, "Area Data", rows, header_color)
-
-    share_email = os.getenv("GOOGLE_SHARE_EMAIL", "").strip()
-    if share_email:
-        try:
-            spreadsheet.share(share_email, perm_type="user", role="writer", notify=False)
-        except Exception:
-            pass
-
-    try:
-        spreadsheet.share("", perm_type="anyone", role="reader")
-    except Exception:
-        pass
-
-    return spreadsheet.url
