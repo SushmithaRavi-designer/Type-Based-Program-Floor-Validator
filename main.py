@@ -645,6 +645,24 @@ class FunctionInputs(AutomateBase):
         description="Select output destination: excel, google_sheets, or both",
     )
 
+    google_credentials_json: str | None = Field(
+        default=None,
+        alias="googleCredentialsJson",
+        validation_alias=AliasChoices("google_credentials_json", "googleCredentialsJson"),
+        serialization_alias="googleCredentialsJson",
+        title="Google Credentials JSON",
+        description="Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
+    )
+
+    google_share_email: str | None = Field(
+        default=None,
+        alias="googleShareEmail",
+        validation_alias=AliasChoices("google_share_email", "googleShareEmail"),
+        serialization_alias="googleShareEmail",
+        title="Google Share Email",
+        description="Optional email to grant writer access to the created sheet.",
+    )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Automate Function
 # ─────────────────────────────────────────────────────────────────────────────
@@ -653,6 +671,12 @@ def automate_function(
     automate_context: AutomationContext,
     function_inputs: FunctionInputs,
 ) -> None:
+    # Fallback for Speckle setups where secret env vars are not exposed in UI.
+    if function_inputs.google_credentials_json and function_inputs.google_credentials_json.strip():
+        os.environ["GOOGLE_CREDENTIALS_JSON"] = function_inputs.google_credentials_json.strip()
+    if function_inputs.google_share_email and function_inputs.google_share_email.strip():
+        os.environ["GOOGLE_SHARE_EMAIL"] = function_inputs.google_share_email.strip()
+
     version_root_object = automate_context.receive_version()
     collections = _get_area_export_collections(version_root_object)
 
