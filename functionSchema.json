@@ -1,7 +1,6 @@
 {
   "$defs": {
     "OutputFormat": {
-      "description": "Export output format selection.",
       "enum": [
         "excel",
         "google_sheets",
@@ -11,31 +10,32 @@
       "type": "string"
     }
   },
-  "description": "These are function author-defined values.\n\nAutomate will make sure to supply them matching the types specified here.\nPlease use the pydantic model schema to define your inputs:\nhttps://docs.pydantic.dev/latest/usage/models/",
   "properties": {
-    "outputFormat": {
+    "output_format": {
       "$ref": "#/$defs/OutputFormat",
       "default": "excel",
-      "description": "Select output destination: excel, google_sheets, or both",
+      "description": "Select output destination: excel, google_sheets, or both.",
       "title": "Output Format"
     },
-    "googleCredentialsJson": {
-      "type": "string",
+    "google_credentials_json": {
       "default": "",
-      "description": "Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
-      "title": "Google Credentials JSON"
+      "description": "Leave blank \u2014 read from GOOGLE_CREDENTIALS_JSON env var.",
+      "format": "password",
+      "title": "Google Credentials JSON (optional override)",
+      "type": "string",
+      "writeOnly": true
     },
-    "googleShareEmail": {
-      "type": "string",
+    "google_share_email": {
       "default": "",
-      "description": "Optional email to grant writer access to the created sheet.",
-      "title": "Google Share Email"
+      "description": "Leave blank \u2014 read from GOOGLE_SHARE_EMAIL env var.",
+      "title": "Google Share Email (optional override)",
+      "type": "string"
     },
-    "googleSpreadsheetId": {
-      "type": "string",
+    "google_spreadsheet_id": {
       "default": "",
-      "description": "Optional existing spreadsheet ID. If provided, data is written there instead of creating a new file.",
-      "title": "Google Spreadsheet ID"
+      "description": "Leave blank \u2014 read from GOOGLE_SPREADSHEET_ID env var. Accepts bare ID or full URL.",
+      "title": "Google Spreadsheet ID (optional override)",
+      "type": "string"
     }
   },
   "title": "FunctionInputs",
