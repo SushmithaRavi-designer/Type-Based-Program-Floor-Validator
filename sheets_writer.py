@@ -14,6 +14,7 @@ No URL needs to be pasted per run.
 import json
 import os
 import re
+import base64
 from typing import Optional
 
 # Load .env relative to THIS file's directory (works locally and in Speckle Automate)
@@ -39,6 +40,37 @@ _SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+
+
+def _parse_credentials_json(raw_value: str) -> dict:
+    """Parse credentials from raw JSON, double-encoded JSON, or base64 JSON."""
+    raw = (raw_value or "").strip()
+    if not raw:
+        raise ValueError("empty credentials")
+
+    # 1) Normal JSON object
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    # 2) Double-encoded JSON string
+    try:
+        decoded = json.loads(raw)
+        if isinstance(decoded, str):
+            return json.loads(decoded)
+    except Exception:
+        pass
+
+    # 3) Base64-encoded JSON string
+    try:
+        padded = raw + "=" * ((4 - len(raw) % 4) % 4)
+        decoded_bytes = base64.b64decode(padded)
+        return json.loads(decoded_bytes.decode("utf-8"))
+    except Exception as ex:
+        raise ValueError(
+            "Invalid Google credentials format. Paste valid JSON or use base64-encoded JSON."
+        ) from ex
 
 
 def _get_client():
@@ -70,8 +102,9 @@ def _get_client():
 
     # 3. Try raw JSON string (Speckle Automate function variable)
     creds_raw = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
-    if creds_raw:
-        creds_dict = json.loads(creds_raw)
+    creds_b64 = os.getenv("GOOGLE_CREDENTIALS_JSON_BASE64", "").strip()
+    if creds_raw or creds_b64:
+        creds_dict = _parse_credentials_json(creds_raw or creds_b64)
         creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
         return gspread.authorize(creds)
 

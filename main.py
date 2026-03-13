@@ -653,6 +653,14 @@ class FunctionInputs(AutomateBase):
         description="Optional fallback when runtime secrets are unavailable. Paste full service-account JSON.",
     )
 
+    googleCredentialsJsonBase64: str = Field(
+        default="",
+        validation_alias=AliasChoices("googleCredentialsJsonBase64", "google_credentials_json_base64"),
+        serialization_alias="googleCredentialsJsonBase64",
+        title="Google Credentials JSON (Base64)",
+        description="Safer alternative to avoid JSON paste/escaping issues. Paste base64-encoded service-account JSON.",
+    )
+
     google_share_email: str = Field(
         default="",
         alias="googleShareEmail",
@@ -683,6 +691,9 @@ def automate_function(
     credentials_json = function_inputs.googleCredentialsJson.get_secret_value().strip()
     if credentials_json:
         os.environ["GOOGLE_CREDENTIALS_JSON"] = credentials_json
+    credentials_b64 = function_inputs.googleCredentialsJsonBase64.strip()
+    if credentials_b64:
+        os.environ["GOOGLE_CREDENTIALS_JSON_BASE64"] = credentials_b64
     if function_inputs.google_share_email and function_inputs.google_share_email.strip():
         os.environ["GOOGLE_SHARE_EMAIL"] = function_inputs.google_share_email.strip()
 
@@ -714,10 +725,10 @@ def automate_function(
         return
 
     export_summary = ""
-    export_error = None
+    export_warnings = []
 
     def _store_excel_export() -> None:
-        nonlocal export_summary, export_error
+        nonlocal export_summary, export_warnings
         try:
             excel_path = rows_to_excel_multi_sheet(sheet_rows)
             named_path = excel_path.replace(".xlsx", "_collection_areas.xlsx")
@@ -729,10 +740,10 @@ def automate_function(
             automate_context.store_file_result(excel_path)
             export_summary += (" | " if export_summary else "") + "Excel workbook with multiple sheets attached."
         except Exception as ex:
-            export_error = f"ERROR creating Excel: {str(ex)}"
+            export_warnings.append(f"Excel export failed: {str(ex)}")
 
     def _store_google_sheets_export() -> None:
-        nonlocal export_summary, export_error
+        nonlocal export_summary, export_warnings
         try:
             from sheets_writer import write_collection_areas_to_google_sheets
 
@@ -753,8 +764,8 @@ def automate_function(
                     " Verify googleSpreadsheetId (or paste full sheet URL) and ensure the sheet is shared with "
                     "the service account as Editor."
                 )
-            export_error = (
-                "ERROR with Google Sheets: "
+            export_warnings.append(
+                "Google Sheets export failed: "
                 f"{msg}. "
                 "Set outputFormat=google_sheets or both, and configure GOOGLE_CREDENTIALS_JSON "
                 "(or GOOGLE_CREDENTIALS_FILE) in your runtime environment."
@@ -764,13 +775,15 @@ def automate_function(
         _store_excel_export()
     elif function_inputs.output_format == OutputFormat.GOOGLE_SHEETS:
         _store_google_sheets_export()
+        if not export_summary:
+            _store_excel_export()
     else:
         _store_excel_export()
-        if not export_error:
-            _store_google_sheets_export()
+        _store_google_sheets_export()
 
-    if export_error:
-        automate_context.mark_run_failed(export_error)
+    if not export_summary:
+        details = " | ".join(export_warnings) if export_warnings else "No export output was generated."
+        automate_context.mark_run_failed(details)
         return
 
     sheet_descriptions = [
@@ -813,6 +826,8 @@ def automate_function(
         f"Night Occupancy Ratio: {night_ratio if night_ratio is not None else _ratio_for('NIGHT OCCUPANCY')}%",
     ]
 
+    warning_text = f"\nWarnings: {' | '.join(export_warnings)}" if export_warnings else ""
+
     automate_context.mark_run_success(
         "Collection area export complete.\n"
         f"Sheets: {', '.join(sheet_rows.keys())}\n"
@@ -821,6 +836,7 @@ def automate_function(
         f"{export_summary}\n"
         f"Details: {'; '.join(sheet_descriptions)}\n"
         f"{'; '.join(occupancy_ratio_lines)}"
+        f"{warning_text}"
     )
 
 
