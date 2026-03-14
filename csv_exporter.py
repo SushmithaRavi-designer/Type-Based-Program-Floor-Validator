@@ -30,6 +30,9 @@ PROGRAM_HEX_COLORS = {
     "residential": "FFF2CC",   # light yellow
     "office": "F8CECC",        # light red
     "parking": "F5F5F5",       # light grey
+    "voids": "E6E6E6",         # light grey
+    "workadmin": "FDD9B5",     # pale peach
+    "corporate": "B1DDF0",     # pale blue
 }
 
 def rows_to_csv(rows: List[Dict]) -> str:
