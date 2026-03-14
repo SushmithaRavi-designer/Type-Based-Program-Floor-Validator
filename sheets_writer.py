@@ -275,36 +275,6 @@ def _write_dynamic_sheet(
     )
     ws.freeze(rows=1)
 
-    # Apply specific background colors to 'Program' cells
-    if "Program" in columns:
-        prog_col_idx = columns.index("Program")
-        requests = []
-        for row_idx, row in enumerate(rows, 1): # 1-based data rows (header is 0)
-            prog_val = str(row.get("Program", "")).lower().strip()
-            color = PROGRAM_GS_COLORS.get(prog_val)
-            if color:
-                requests.append({
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": ws.id,
-                            "startRowIndex": row_idx,
-                            "endRowIndex": row_idx + 1,
-                            "startColumnIndex": prog_col_idx,
-                            "endColumnIndex": prog_col_idx + 1
-                        },
-                        "cell": {
-                            "userEnteredFormat": {
-                                "backgroundColor": color
-                            }
-                        },
-                        "fields": "userEnteredFormat.backgroundColor"
-                    }
-                })
-        
-        if requests:
-            import gspread.utils
-            spreadsheet.batch_update({"requests": requests})
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
