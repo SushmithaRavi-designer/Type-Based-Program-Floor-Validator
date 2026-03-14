@@ -221,6 +221,16 @@ def _share_spreadsheet(spreadsheet) -> None:
 # Sheet writers
 # ─────────────────────────────────────────────────────────────────────────────
 
+PROGRAM_GS_COLORS = {
+    "medical": {"red": 0.835, "green": 0.910, "blue": 0.824},     # light green
+    "transit": {"red": 0.855, "green": 0.910, "blue": 0.988},     # light blue
+    "retail": {"red": 1.0, "green": 0.902, "blue": 0.8},          # light orange
+    "amenities": {"red": 0.882, "green": 0.835, "blue": 0.906},   # light purple
+    "residential": {"red": 1.0, "green": 0.949, "blue": 0.8},     # light yellow
+    "office": {"red": 0.973, "green": 0.804, "blue": 0.804},      # light red
+    "parking": {"red": 0.961, "green": 0.961, "blue": 0.961},     # light grey
+}
+
 def _write_dynamic_sheet(
     spreadsheet,
     sheet_name: str,
@@ -261,6 +271,36 @@ def _write_dynamic_sheet(
         },
     )
     ws.freeze(rows=1)
+
+    # Apply specific background colors to 'Program' cells
+    if "Program" in columns:
+        prog_col_idx = columns.index("Program")
+        requests = []
+        for row_idx, row in enumerate(rows, 1): # 1-based data rows (header is 0)
+            prog_val = str(row.get("Program", "")).lower().strip()
+            color = PROGRAM_GS_COLORS.get(prog_val)
+            if color:
+                requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "startRowIndex": row_idx,
+                            "endRowIndex": row_idx + 1,
+                            "startColumnIndex": prog_col_idx,
+                            "endColumnIndex": prog_col_idx + 1
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": color
+                            }
+                        },
+                        "fields": "userEnteredFormat.backgroundColor"
+                    }
+                })
+        
+        if requests:
+            import gspread.utils
+            spreadsheet.batch_update({"requests": requests})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -290,7 +290,7 @@ def _level_sort_key(level: str):
     return (0, int(match.group(1)), str(level)) if match else (1, 0, str(level))
 
 
-def _build_rows(collection_obj) -> list[dict]:
+def _build_rows(collection_obj, sname: str) -> list[dict]:
     rows = []
     for obj in flatten_base(collection_obj):
         if "Collection" in str(getattr(obj, "speckle_type", "")):
@@ -299,16 +299,26 @@ def _build_rows(collection_obj) -> list[dict]:
         if area <= 0:
             continue
         ratios = _extract_occupancy_ratios(obj)
-        rows.append({
-            "Level":                     _extract_level(obj),
-            "Element Name":              getattr(obj, "name", "") or "",
-            "Properties Area":           round(area, 2),
-            "Morning Occupancy Ratio":   ratios["Morning Occupancy Ratio"]   if ratios["Morning Occupancy Ratio"]   is not None else "",
-            "Afternoon Occupancy Ratio": ratios["Afternoon Occupancy Ratio"] if ratios["Afternoon Occupancy Ratio"] is not None else "",
-            "Evening Occupancy Ratio":   ratios["Evening Occupancy Ratio"]   if ratios["Evening Occupancy Ratio"]   is not None else "",
-            "Night Occupancy Ratio":     ratios["Night Occupancy Ratio"]     if ratios["Night Occupancy Ratio"]     is not None else "",
-        })
-    rows.sort(key=lambda r: (_level_sort_key(r.get("Level", "")), str(r.get("Element Name", ""))))
+        
+        row = {
+            "Level":   _extract_level(obj),
+            "Program": getattr(obj, "name", "") or "",
+            "Area":    round(area, 2),
+        }
+        
+        # Add occupancy columns conditionally based on the sheet name
+        if sname.startswith("MORNING") or sname.startswith("MORNING OCCUPANCY"):
+            row["Morning Occupancy Ratio"] = ratios["Morning Occupancy Ratio"] if ratios["Morning Occupancy Ratio"] is not None else ""
+        elif sname.startswith("AFTERNOON") or sname.startswith("AFTERNOON OCCUPANCY"):
+            row["Afternoon Occupancy Ratio"] = ratios["Afternoon Occupancy Ratio"] if ratios["Afternoon Occupancy Ratio"] is not None else ""
+        elif sname.startswith("EVENING") or sname.startswith("EVENING OCCUPANCY"):
+            row["Evening Occupancy Ratio"] = ratios["Evening Occupancy Ratio"] if ratios["Evening Occupancy Ratio"] is not None else ""
+        elif sname.startswith("NIGHT") or sname.startswith("NIGHT OCCUPANCY"):
+            row["Night Occupancy Ratio"] = ratios["Night Occupancy Ratio"] if ratios["Night Occupancy Ratio"] is not None else ""
+            
+        rows.append(row)
+        
+    rows.sort(key=lambda r: (_level_sort_key(r.get("Level", "")), str(r.get("Program", ""))))
     return rows
 
 
@@ -413,13 +423,13 @@ def automate_function(
     total_area       = 0.0
 
     for col_name, col_obj in collections.items():
-        rows = _build_rows(col_obj)
+        sname                     = _sheet_name(col_name, set(sheet_rows.keys()))
+        rows                      = _build_rows(col_obj, sname)
         if not rows:
             continue
-        sname                     = _sheet_name(col_name, set(sheet_rows.keys()))
         sheet_rows[sname]         = rows
         collection_counts[sname]  = len(rows)
-        area                      = sum(r.get("Properties Area", 0) for r in rows)
+        area                      = sum(r.get("Area", 0) for r in rows)
         collection_areas[sname]   = area
         total_area               += area
 
