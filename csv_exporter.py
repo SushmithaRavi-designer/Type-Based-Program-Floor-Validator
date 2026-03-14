@@ -21,20 +21,6 @@ COLUMNS = [
     "Area_Evening",
 ]
 
-
-PROGRAM_HEX_COLORS = {
-    "medical": "D5E8D4",       # light green
-    "transit": "DAE8FC",       # light blue
-    "retail": "FFE6CC",        # light orange
-    "amenities": "E1D5E7",     # light purple
-    "residential": "FFF2CC",   # light yellow
-    "office": "F8CECC",        # light red
-    "parking": "F5F5F5",       # light grey
-    "voids": "E6E6E6",         # light grey
-    "workadmin": "FDD9B5",     # pale peach
-    "corporate": "B1DDF0",     # pale blue
-}
-
 def rows_to_csv(rows: List[Dict]) -> str:
     """
     Convert a list of row dicts to a UTF-8 CSV string.
@@ -119,13 +105,6 @@ def rows_to_excel_multi_sheet(sheets_dict: dict, filename: str = None) -> str:
                     value = row_data.get(header, "")
                     cell = ws.cell(row=row_idx, column=col_idx, value=value)
                     cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-                    
-                    # Add background color for Program cells
-                    if header == "Program" and value:
-                        prog_key = str(value).lower().strip()
-                        color_hex = PROGRAM_HEX_COLORS.get(prog_key)
-                        if color_hex:
-                            cell.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
                             
                     # Right align numeric columns
                     if "Area" in header or "Area_" in header:

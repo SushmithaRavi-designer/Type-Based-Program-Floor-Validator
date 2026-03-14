@@ -221,19 +221,6 @@ def _share_spreadsheet(spreadsheet) -> None:
 # Sheet writers
 # ─────────────────────────────────────────────────────────────────────────────
 
-PROGRAM_GS_COLORS = {
-    "medical": {"red": 0.835, "green": 0.910, "blue": 0.824},     # light green
-    "transit": {"red": 0.855, "green": 0.910, "blue": 0.988},     # light blue
-    "retail": {"red": 1.0, "green": 0.902, "blue": 0.8},          # light orange
-    "amenities": {"red": 0.882, "green": 0.835, "blue": 0.906},   # light purple
-    "residential": {"red": 1.0, "green": 0.949, "blue": 0.8},     # light yellow
-    "office": {"red": 0.973, "green": 0.804, "blue": 0.804},      # light red
-    "parking": {"red": 0.961, "green": 0.961, "blue": 0.961},     # light grey
-    "voids": {"red": 0.902, "green": 0.902, "blue": 0.902},       # voids grey
-    "workadmin": {"red": 0.992, "green": 0.851, "blue": 0.710},   # pale peach
-    "corporate": {"red": 0.694, "green": 0.867, "blue": 0.941},   # pale blue
-}
-
 def _write_dynamic_sheet(
     spreadsheet,
     sheet_name: str,
