@@ -440,6 +440,70 @@ def automate_function(
         )
         return
 
+    # Add a Summary sheet at the end
+    summary_rows = []
+    
+    # Calculate occupancy ratios for summary
+    _OCC_SHEETS = {"MORNING OCCUPANCY", "AFTERNOON OCCUPANCY", "EVENING OCCUPANCY", "NIGHT OCCUPANCY"}
+    occ_total   = sum(v for k, v in collection_areas.items() if k in _OCC_SHEETS)
+
+    def _ratio(sname: str) -> float:
+        if occ_total <= 0:
+            return 0.0
+        return round(collection_areas.get(sname, 0.0) / occ_total * 100, 2)
+
+    def _first_ratio(sname: str, col: str) -> float | None:
+        for row in sheet_rows.get(sname, []):
+            v = _parse_ratio(row.get(col))
+            if v is not None:
+                return v
+        return None
+
+    morning_ratio   = _first_ratio('MORNING OCCUPANCY',   'Morning Occupancy Ratio')   or _ratio('MORNING OCCUPANCY')
+    afternoon_ratio = _first_ratio('AFTERNOON OCCUPANCY', 'Afternoon Occupancy Ratio') or _ratio('AFTERNOON OCCUPANCY')
+    evening_ratio   = _first_ratio('EVENING OCCUPANCY',   'Evening Occupancy Ratio')   or _ratio('EVENING OCCUPANCY')
+    night_ratio     = _first_ratio('NIGHT OCCUPANCY',     'Night Occupancy Ratio')     or _ratio('NIGHT OCCUPANCY')
+
+    # Basic totals
+    summary_rows.append({
+        "Metric": "Total rows",
+        "Value": sum(collection_counts.values())
+    })
+    summary_rows.append({
+        "Metric": "Total area",
+        "Value": f"{round(total_area, 2)} m²"
+    })
+    summary_rows.append({"Metric": "", "Value": ""})  # Blank row for spacing
+    
+    # Details per sheet
+    for sname, count in collection_counts.items():
+        summary_rows.append({
+            "Metric": f"Details: {sname}",
+            "Value": f"{count} rows"
+        })
+        
+    summary_rows.append({"Metric": "", "Value": ""})  # Blank row for spacing
+    
+    # Occupancy Ratios
+    summary_rows.append({
+        "Metric": "Morning Occupancy Ratio",
+        "Value": f"{morning_ratio}%"
+    })
+    summary_rows.append({
+        "Metric": "Afternoon Occupancy Ratio",
+        "Value": f"{afternoon_ratio}%"
+    })
+    summary_rows.append({
+        "Metric": "Evening Occupancy Ratio",
+        "Value": f"{evening_ratio}%"
+    })
+    summary_rows.append({
+        "Metric": "Night Occupancy Ratio",
+        "Value": f"{night_ratio}%"
+    })
+    
+    sheet_rows["SUMMARY"] = summary_rows
+
     # ── Exports ───────────────────────────────────────────────────────────────
     export_parts : list[str] = []
     warnings     : list[str] = []
@@ -477,26 +541,11 @@ def automate_function(
         return
 
     # ── Build success message ─────────────────────────────────────────────────
-    _OCC_SHEETS = {"MORNING OCCUPANCY", "AFTERNOON OCCUPANCY", "EVENING OCCUPANCY", "NIGHT OCCUPANCY"}
-    occ_total   = sum(v for k, v in collection_areas.items() if k in _OCC_SHEETS)
-
-    def _ratio(sname: str) -> float:
-        if occ_total <= 0:
-            return 0.0
-        return round(collection_areas.get(sname, 0.0) / occ_total * 100, 2)
-
-    def _first_ratio(sname: str, col: str) -> float | None:
-        for row in sheet_rows.get(sname, []):
-            v = _parse_ratio(row.get(col))
-            if v is not None:
-                return v
-        return None
-
     occ_lines = "\n".join([
-        f"Morning Occupancy Ratio:   {_first_ratio('MORNING OCCUPANCY',   'Morning Occupancy Ratio')   or _ratio('MORNING OCCUPANCY')}%",
-        f"Afternoon Occupancy Ratio: {_first_ratio('AFTERNOON OCCUPANCY', 'Afternoon Occupancy Ratio') or _ratio('AFTERNOON OCCUPANCY')}%",
-        f"Evening Occupancy Ratio:   {_first_ratio('EVENING OCCUPANCY',   'Evening Occupancy Ratio')   or _ratio('EVENING OCCUPANCY')}%",
-        f"Night Occupancy Ratio:     {_first_ratio('NIGHT OCCUPANCY',     'Night Occupancy Ratio')     or _ratio('NIGHT OCCUPANCY')}%",
+        f"Morning Occupancy Ratio:   {morning_ratio}%",
+        f"Afternoon Occupancy Ratio: {afternoon_ratio}%",
+        f"Evening Occupancy Ratio:   {evening_ratio}%",
+        f"Night Occupancy Ratio:     {night_ratio}%",
     ])
 
     google_line  = f"Google Sheets: {google_url}\n" if google_url else ""
